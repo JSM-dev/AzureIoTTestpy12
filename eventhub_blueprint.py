@@ -61,22 +61,22 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent):
         logging.error(f"Cosmos DB database or container not found: {str(e)}")
         return
 
-    # # Prepare document to insert
-    # try:
-    #     event_data = json.loads(message)
-    # except Exception:
-    #     event_data = {"raw": 'Exception during json.loads'}
+    # Prepare document to insert
+    try:
+        event_data = json.loads(message)
+    except Exception:
+        event_data = {"raw": 'Exception during json.loads'}
 
-    # doc = {
-    #     "id": azeventhub.sequence_number if hasattr(azeventhub, 'sequence_number') else str(datetime.datetime.utcnow().timestamp()),
-    #     "eventType": event_data.get("type", "generic"),
-    #     "body": event_data,
-    #     "timestamp": datetime.datetime.utcnow().isoformat()
-    # }
+    doc = {
+        "id": azeventhub.sequence_number if hasattr(azeventhub, 'sequence_number') else str(datetime.datetime.utcnow().timestamp()),
+        "eventType": event_data.get("type", "generic"),
+        "body": event_data,
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }
 
-    # # Write to Cosmos DB
-    # try:
-    #     container.upsert_item(doc)
-    #     logging.info("Event written to Cosmos DB: %s", doc["id"])
-    # except Exception as e:
-    #     logging.error("Failed to write event to Cosmos DB: %s", str(e))
+    # Write to Cosmos DB
+    try:
+        container.upsert_item(doc)
+        logging.info("Event written to Cosmos DB: %s", doc["id"])
+    except Exception as e:
+        logging.error("Failed to write event to Cosmos DB: %s", str(e))
