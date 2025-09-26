@@ -16,8 +16,8 @@ bp_eventhub = func.Blueprint()
 )
 @bp_eventhub.cosmos_db_output(
     arg_name="cosmosout",
-    database_name="CosmosDbDatabase",
-    container_name="CosmosDbContainer", 
+    database_name="%CosmosDbDatabase%",
+    container_name="%CosmosDbContainer%", 
     connection="CosmosDbConnectionString"
 )
 
@@ -70,15 +70,10 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.D
         "timestamp": datetime.datetime.utcnow().isoformat()
     }
 
-    # Write to Cosmos DB using output binding (no try/catch needed!)
-    try:
-         logging.info('Prepared document for Cosmos DB: %s', doc)
-    except Exception as e:
-        logging.error(f"Error logging prepared document: {str(e)}")
-
-    try:
-        cosmosout.set(func.Document.from_dict(doc))
-        logging.info("Event written to Cosmos DB via binding: %s", doc["id"])   
-    except Exception as e:
-        logging.error(f"Error writing document to Cosmos DB: {str(e)}")
+    # Write to Cosmos DB using output binding
+    logging.info('Prepared document for Cosmos DB: %s', doc)
+    
+    # This WILL write to Cosmos DB when the function completes!
+    cosmosout.set(func.Document.from_dict(doc))
+    logging.info("Document queued for Cosmos DB write: %s", doc["id"])
 
