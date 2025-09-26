@@ -71,5 +71,14 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.D
     }
 
     # Write to Cosmos DB using output binding (no try/catch needed!)
-    cosmosout.set(func.Document.from_dict(doc))
-    logging.info("Event written to Cosmos DB via binding: %s", doc["id"])
+    try:
+         logging.info('Prepared document for Cosmos DB: %s', doc)
+    except Exception as e:
+        logging.error(f"Error logging prepared document: {str(e)}")
+
+    try:
+        cosmosout.set(func.Document.from_dict(doc))
+        logging.info("Event written to Cosmos DB via binding: %s", doc["id"])   
+    except Exception as e:
+        logging.error(f"Error writing document to Cosmos DB: {str(e)}")
+
