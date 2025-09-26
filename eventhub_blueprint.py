@@ -23,14 +23,15 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent):
     COSMOS_CONNECTION_STRING = os.environ.get('CosmosDbConnectionString')
     COSMOS_DB_NAME = os.environ.get('CosmosDbDatabase', 'IoTEvents')
     COSMOS_CONTAINER_NAME = os.environ.get('CosmosDbContainer', 'Events')
+    logging.info('Python EventHub trigger psrocessed an event: %s', COSMOS_CONNECTION_STRING,COSMOS_DB_NAME,COSMOS_CONTAINER_NAME)
 
     # Connect to Cosmos DB using connection string
-    client = CosmosClient.from_connection_string(COSMOS_CONNECTION_STRING)
-    try:
-        database = client.get_database_client(COSMOS_DB_NAME)
-        container = database.get_container_client(COSMOS_CONTAINER_NAME)
-    except Exception as e:
-        logging.error(f"Cosmos DB database or container not found: {str(e)}")
+    # client = CosmosClient.from_connection_string(COSMOS_CONNECTION_STRING)
+    # try:
+    #     database = client.get_database_client(COSMOS_DB_NAME)
+    #     container = database.get_container_client(COSMOS_CONTAINER_NAME)
+    # except Exception as e:
+    #     logging.error(f"Cosmos DB database or container not found: {str(e)}")
         return
 
     # # Prepare document to insert
