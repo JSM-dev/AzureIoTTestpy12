@@ -3,6 +3,7 @@ import logging
 import json
 import datetime
 import os
+import uuid
 
 
 bp_eventhub = func.Blueprint()
@@ -16,8 +17,8 @@ bp_eventhub = func.Blueprint()
 )
 @bp_eventhub.cosmos_db_output(
     arg_name="cosmosout",
-    database_name="EOKS-db-prod",
-    container_name="Container1",
+    database_name=os.environ.get('CosmosDbDatabase', 'EOKS-db-prod'),
+    container_name=os.environ.get('CosmosDbContainer', 'Container1'),
     connection="CosmosDbConnectionString"
 )
 
@@ -61,10 +62,14 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.D
     try:
         event_data = json.loads(message)
     except Exception:
-        event_data = {"raw": 'Exception during json.loads'}
+        event_data = {"raw": 'Exception during json.loads or was flat',
+                       "rawMessage": message}
 
     doc = {
-        "id": azeventhub.sequence_number if hasattr(azeventhub, 'sequence_number') else str(datetime.datetime.utcnow().timestamp()),
+        "id": str(uuid.uuid4()),  # Generate unique GUID for document ID
+        "sequenceNumber": azeventhub.sequence_number if hasattr(azeventhub, 'sequence_number') else None,
+        "CustomerId": event_data.get("CustomerId", "default-customer"),  # Required for partition key
+        "LocationSiteId": event_data.get("LocationSiteId", "default-location"),  # Required for partition key
         "eventType": event_data.get("type", "generic"),
         "body": event_data,
         "timestamp": datetime.datetime.utcnow().isoformat()
@@ -73,7 +78,14 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.D
     # Write to Cosmos DB using output binding
     logging.info('Prepared document for Cosmos DB: %s', doc)
     
-    # This WILL write to Cosmos DB when the function completes!
-    cosmosout.set(func.Document.from_dict(doc))
-    logging.info("Document queued for Cosmos DB write: %s", doc["id"])
+    try:
+        # This WILL write to Cosmos DB when the function completes!
+        cosmosout.set(func.Document.from_dict(doc))
+        logging.info("Document queued for Cosmos DB write: %s", doc["id"])
+    except Exception as e:
+        logging.error(f"Error setting Cosmos DB document: {str(e)}")
+        # Try with minimal document as fallback
+        minimal_doc = {"id": str(datetime.datetime.utcnow().timestamp()), "test": "data"}
+        cosmosout.set(func.Document.from_dict(minimal_doc))
+        logging.info("Tried with minimal document instead")
 
