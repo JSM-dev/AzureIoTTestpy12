@@ -38,7 +38,7 @@ jobs:
         run: |
           source venv/bin/activate
           pip install --upgrade pip
-          pip install -r requirements.txt --target ./.python_packages/lib/site-packages
+          pip install -r requirements.txt
 
       # Optional: Add step to run tests here
 
@@ -84,6 +84,8 @@ jobs:
           ls -la
           echo "Python files:"
           find . -name "*.py" -type f
+          echo "Requirements content:"
+          cat requirements.txt
 
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
@@ -92,6 +94,6 @@ jobs:
           app-name: 'ISEOS-FA-Py12'
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          scm-do-build-during-deployment: false
-          enable-oryx-build: false
-          
+          scm-do-build-during-deployment: true
+          enable-oryx-build: true
+           
