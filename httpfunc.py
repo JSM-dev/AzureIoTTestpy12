@@ -1,6 +1,6 @@
-from azure.functions import Blueprint, HttpRequest, HttpResponse
-
-bp_httpfunc = Blueprint()
+from azure.functions import HttpRequest, HttpResponse
+import azure.functions as func
+bp_httpfunc = func.Blueprint()
 
 @bp_httpfunc.route(route="hello", methods=["GET", "POST"])
 def hello_func(req: HttpRequest) -> HttpResponse:

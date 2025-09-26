@@ -1,13 +1,11 @@
 import azure.functions as func
-from azure.functions import Blueprint
 import logging
 import json
 import datetime
-from azure.cosmos import CosmosClient
 import os
 
 
-bp_eventhub = Blueprint()
+bp_eventhub = func.Blueprint()
 
 
 @bp_eventhub.event_hub_message_trigger(
@@ -25,14 +23,18 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent):
     COSMOS_CONTAINER_NAME = os.environ.get('CosmosDbContainer', 'Events')
     logging.info('Python EventHub trigger psrocessed an event: %s', COSMOS_CONNECTION_STRING,COSMOS_DB_NAME,COSMOS_CONTAINER_NAME)
 
-    # Connect to Cosmos DB using connection string
-    # client = CosmosClient.from_connection_string(COSMOS_CONNECTION_STRING)
-    # try:
-    #     database = client.get_database_client(COSMOS_DB_NAME)
-    #     container = database.get_container_client(COSMOS_CONTAINER_NAME)
-    # except Exception as e:
-    #     logging.error(f"Cosmos DB database or container not found: {str(e)}")
-        # return
+    # Connect to Cosmos DB using connection string (lazy import)
+    try:
+        from azure.cosmos import CosmosClient
+        client = CosmosClient.from_connection_string(COSMOS_CONNECTION_STRING)
+        database = client.get_database_client(COSMOS_DB_NAME)
+        container = database.get_container_client(COSMOS_CONTAINER_NAME)
+    except ImportError as e:
+        logging.error(f"Failed to import azure.cosmos: {str(e)}")
+        return
+    except Exception as e:
+        logging.error(f"Cosmos DB database or container not found: {str(e)}")
+        return
 
     # # Prepare document to insert
     # try:
