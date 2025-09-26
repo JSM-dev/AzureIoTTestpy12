@@ -16,8 +16,8 @@ bp_eventhub = func.Blueprint()
 )
 @bp_eventhub.cosmos_db_output(
     arg_name="cosmosout",
-    database_name="%CosmosDbDatabase%",
-    container_name="%CosmosDbContainer%", 
+    database_name="EOKS-db-prod",
+    container_name="Container1",
     connection="CosmosDbConnectionString"
 )
 
