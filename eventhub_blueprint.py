@@ -14,8 +14,14 @@ bp_eventhub = func.Blueprint()
     connection="EventHubConStr",
     consumer_group='$Default'
 )
+@bp_eventhub.cosmos_db_output(
+    arg_name="cosmosout",
+    database_name="CosmosDbDatabase",
+    container_name="CosmosDbContainer", 
+    connection="CosmosDbConnectionString"
+)
 
-def ISEOS_iot_Handler(azeventhub: func.EventHubEvent):
+def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.Document]):
     message = azeventhub.get_body().decode('utf-8')
     logging.info('Python EventHub trigger psrocessed an event: %s', message)
 
@@ -48,18 +54,8 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent):
     else:
         logging.error('Cosmos connection string is MISSING from Application Settings!')
 
-    # Connect to Cosmos DB using connection string (lazy import)
-    try:
-        from azure.cosmos import CosmosClient
-        client = CosmosClient.from_connection_string(COSMOS_CONNECTION_STRING)
-        database = client.get_database_client(COSMOS_DB_NAME)
-        container = database.get_container_client(COSMOS_CONTAINER_NAME)
-    except ImportError as e:
-        logging.error(f"Failed to import azure.cosmos: {str(e)}")
-    
-    except Exception as e:
-        logging.error(f"Cosmos DB database or container not found: {str(e)}")
-     
+    # Using Azure Functions Cosmos DB Output Binding (no SDK import needed!)
+    logging.info("Using Cosmos DB output binding - no package import required")
 
     # Prepare document to insert
     try:
@@ -74,9 +70,6 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent):
         "timestamp": datetime.datetime.utcnow().isoformat()
     }
 
-    # Write to Cosmos DB
-    try:
-        container.upsert_item(doc)
-        logging.info("Event written to Cosmos DB: %s", doc["id"])
-    except Exception as e:
-        logging.error("Failed to write event to Cosmos DB: %s", str(e))
+    # Write to Cosmos DB using output binding (no try/catch needed!)
+    cosmosout.set(func.Document.from_dict(doc))
+    logging.info("Event written to Cosmos DB via binding: %s", doc["id"])

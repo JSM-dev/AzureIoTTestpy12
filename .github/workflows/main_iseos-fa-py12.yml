@@ -41,8 +41,8 @@ jobs:
           # Install packages to both locations to ensure they're available
           pip install -r requirements.txt --target ./.python_packages/lib/site-packages
           pip install -r requirements.txt
-          # Verify azure-cosmos is installed
-          python -c "import azure.cosmos; print('azure-cosmos successfully installed')"
+          # Verify azure-functions is installed
+          python -c "import azure.functions; print('azure-functions successfully installed')"
 
       # Optional: Add step to run tests here
 
