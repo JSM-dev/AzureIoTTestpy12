@@ -18,10 +18,35 @@ bp_eventhub = func.Blueprint()
 def ISEOS_iot_Handler(azeventhub: func.EventHubEvent):
     message = azeventhub.get_body().decode('utf-8')
     logging.info('Python EventHub trigger psrocessed an event: %s', message)
-    COSMOS_CONNECTION_STRING = os.environ.get('CosmosDbConnectionString')
-    COSMOS_DB_NAME = os.environ.get('CosmosDbDatabase', 'IoTEvents')
-    COSMOS_CONTAINER_NAME = os.environ.get('CosmosDbContainer', 'Events')
-    logging.info('Python EventHub trigger psrocessed an event: %s', COSMOS_CONNECTION_STRING,COSMOS_DB_NAME,COSMOS_CONTAINER_NAME)
+
+    # Get environment variables
+    try:
+        COSMOS_CONNECTION_STRING = os.environ.get('CosmosDbConnectionString')
+        COSMOS_DB_NAME = os.environ.get('CosmosDbDatabase', 'IoTEvents')
+        COSMOS_CONTAINER_NAME = os.environ.get('CosmosDbContainer', 'Events')
+    except Exception as e:
+        logging.error(f"Error retrieving environment variables: {str(e)}")
+        return
+
+    try:   
+    # THIS SHOULD PRINT YOUR DB NAME!
+        logging.info('CONTAINER NAME: %s', COSMOS_CONTAINER_NAME)
+    except Exception as e:
+        logging.error(f"Error logging DB or container name: {str(e)}")
+        return
+
+    try:   
+    # THIS SHOULD PRINT YOUR DB NAME!
+        logging.info('CONTAINER NAME: %s', COSMOS_DB_NAME)
+    except Exception as e:
+        logging.error(f"Error logging COSMOS_DB_NAME")
+        return
+
+
+    if COSMOS_CONNECTION_STRING:
+        logging.info('Cosmos connection string is available')
+    else:
+        logging.error('Cosmos connection string is MISSING from Application Settings!')
 
     # Connect to Cosmos DB using connection string (lazy import)
     try:
