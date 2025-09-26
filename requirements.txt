@@ -2,6 +2,6 @@
 # Ref: aka.ms/functions-azure-monitor-python 
 # azure-monitor-opentelemetry 
 
-azure-functions
-requests
-azure-cosmos 
+azure-functions>=1.18.0
+requests>=2.31.0
+azure-cosmos>=4.5.0
