@@ -3,7 +3,7 @@ from azure.functions import Blueprint
 import logging
 import json
 import datetime
-# from azure.cosmos import CosmosClient
+from azure.cosmos import CosmosClient
 import os
 
 
