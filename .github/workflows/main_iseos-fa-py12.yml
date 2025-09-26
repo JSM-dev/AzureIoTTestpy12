@@ -38,7 +38,11 @@ jobs:
         run: |
           source venv/bin/activate
           pip install --upgrade pip
+          # Install packages to both locations to ensure they're available
+          pip install -r requirements.txt --target ./.python_packages/lib/site-packages
           pip install -r requirements.txt
+          # Verify azure-cosmos is installed
+          python -c "import azure.cosmos; print('azure-cosmos successfully installed')"
 
       # Optional: Add step to run tests here
 
@@ -86,6 +90,10 @@ jobs:
           find . -name "*.py" -type f
           echo "Requirements content:"
           cat requirements.txt
+          echo "Checking .python_packages:"
+          ls -la .python_packages/lib/site-packages/ || echo "No .python_packages found"
+          echo "Looking for azure-cosmos:"
+          find .python_packages/ -name "*cosmos*" || echo "No cosmos packages found"
 
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
@@ -94,6 +102,6 @@ jobs:
           app-name: 'ISEOS-FA-Py12'
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false
            
