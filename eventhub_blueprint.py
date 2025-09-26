@@ -32,7 +32,7 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent):
     #     container = database.get_container_client(COSMOS_CONTAINER_NAME)
     # except Exception as e:
     #     logging.error(f"Cosmos DB database or container not found: {str(e)}")
-        return
+        # return
 
     # # Prepare document to insert
     # try:
