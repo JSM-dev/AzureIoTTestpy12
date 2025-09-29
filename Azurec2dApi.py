@@ -1,61 +1,45 @@
 import azure.functions as func
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import requests
-import base64
-import hmac
-import hashlib
-import urllib.parse
 
 # Create blueprint for C2D messaging
 bp_c2dAPI = func.Blueprint()
-
-def generate_sas_token(uri, key, policy_name, expiry_hours=1):
-    """Generate SAS token for IoT Hub REST API authentication"""
-    expiry = datetime.utcnow() + timedelta(hours=expiry_hours)
-    expiry_timestamp = int(expiry.timestamp())
-    
-    # Create the string to sign
-    string_to_sign = f"{uri}\n{expiry_timestamp}"
-    
-    # Create the signature
-    key_bytes = base64.b64decode(key)
-    signature = base64.b64encode(
-        hmac.new(key_bytes, string_to_sign.encode('utf-8'), hashlib.sha256).digest()
-    ).decode()
-    
-    # Create the SAS token
-    sas_token = f"SharedAccessSignature sr={uri}&sig={urllib.parse.quote(signature)}&se={expiry_timestamp}&skn={policy_name}"
-    logging.info (f"Generated SAS token: {sas_token}")
-    return sas_token
 
 @bp_c2dAPI.route(route="send-c2d", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('C2D message API triggered')
     
     try:
-        # Parse IoT Hub connection string
-        connection_string = os.environ.get('IoTHubConnectionString')
-        if not connection_string:
+        # Get IoT Hub settings from environment variables
+        iot_hub_hostname = os.environ.get('IoTHubHostName')  # e.g., "ISEOS-FA-prod.azure-devices.net"
+        sas_token = os.environ.get('IoTHubSasToken')  # Pre-generated SAS token
+        
+        if not iot_hub_hostname:
             return func.HttpResponse(
-                json.dumps({"error": "IoT Hub connection string not configured"}),
+                json.dumps({"error": "IoTHubHostName not configured in app settings"}),
                 status_code=500,
                 mimetype="application/json"
             )
         
-        # Extract connection string components
-        # Format: HostName=hubname.azure-devices.net;SharedAccessKeyName=service;SharedAccessKey=key
-        parts = dict(item.split('=', 1) for item in connection_string.split(';'))
-        hub_name = parts['HostName'].replace('.azure-devices.net', '')
-        key_name = parts['SharedAccessKeyName']
-        key_value = parts['SharedAccessKey']
+        if not sas_token:
+            return func.HttpResponse(
+                json.dumps({"error": "IoTHubSasToken not configured in app settings"}),
+                status_code=500,
+                mimetype="application/json"
+            )
+        
+        logging.info(f"Using IoT Hub: {iot_hub_hostname}")
+        logging.info(f"SAS token configured: {sas_token[:50]}...")  # Log first 50 chars for verification
         
         # Parse request body
         try:
             req_body = req.get_json()
-        except ValueError:
+            logging.info(f"Request body received: {req_body}")
+        except ValueError as e:
+            logging.error(f"JSON parsing error: {str(e)}")
             return func.HttpResponse(
                 json.dumps({"error": "Invalid JSON in request body"}),
                 status_code=400,
@@ -66,7 +50,9 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
         device_id = req_body.get('deviceId', 'TestBeckhoff')
         command = req_body.get('command')
         value = req_body.get('value', '')
-        message_id = req_body.get('messageId', 'cmd-001')
+        message_id = req_body.get('messageId', f'msg-{int(datetime.utcnow().timestamp())}')
+        
+        logging.info(f"Target device: {device_id}, Command: {command}, Value: {value}")
         
         if not command:
             return func.HttpResponse(
@@ -83,21 +69,38 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
             "timestamp": datetime.utcnow().isoformat()
         }
         
-        # Send via IoT Hub REST API
-        uri = f"{hub_name}.azure-devices.net"
-        sas_token = generate_sas_token(uri, key_value, key_name)
+        # CORRECTED: IoT Hub C2D REST API endpoint with device-specific URL
+        url = f"https://{iot_hub_hostname}/devices/{device_id}/messages/devicebound?api-version=2020-03-13"
         
-        url = f"https://{uri}/messages/devicebound?api-version=2020-03-13"
+        # Headers for C2D messages (removed iothub-to since device is now in URL)
         headers = {
             'Authorization': sas_token,
-            'Content-Type': 'application/json',
-            'iothub-to': f'/devices/{device_id}/messages/devicebound'
+            'Content-Type': 'application/json; charset=utf-8',
+            'iothub-messageid': message_id,
+            'iothub-ack': 'full'
         }
         
-        response = requests.post(url, headers=headers, data=json.dumps(c2d_message))
+        message_body = json.dumps(c2d_message)
+        
+        logging.info(f"=== C2D REQUEST DETAILS ===")
+        logging.info(f"URL: {url}")
+        logging.info(f"Device ID: {device_id}")
+        logging.info(f"Message ID: {message_id}")
+        logging.info(f"Command: {command}")
+        logging.info(f"Headers: {headers}")
+        logging.info(f"Message body: {message_body}")
+        
+        # Send the request
+        response = requests.post(url, headers=headers, data=message_body, timeout=30)
+        
+        logging.info(f"=== RESPONSE ===")
+        logging.info(f"Status: {response.status_code}")
+        logging.info(f"Headers: {dict(response.headers)}")
+        if response.text:
+            logging.info(f"Body: {response.text}")
         
         if response.status_code == 204:
-            logging.info(f"C2D message sent to device {device_id}: {json.dumps(c2d_message)}")
+            logging.info(f"✅ C2D message sent successfully to device {device_id}")
             return func.HttpResponse(
                 json.dumps({
                     "success": True,
@@ -106,21 +109,66 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
                     "value": value,
                     "messageId": message_id,
                     "message": "C2D message sent successfully via REST API",
-                    "method": "IoT Hub REST API"
+                    "method": "IoT Hub REST API (Device-specific endpoint)",
+                    "statusCode": response.status_code,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "endpoint": url
                 }),
                 status_code=200,
                 mimetype="application/json"
             )
-        else:
-            logging.error(f"IoT Hub API error: {response.status_code} - {response.text}")
+        elif response.status_code == 401:
+            logging.error(f"❌ 401 Authentication failed")
             return func.HttpResponse(
-                json.dumps({"error": f"IoT Hub API error: {response.status_code} - {response.text}"}),
+                json.dumps({
+                    "error": "Authentication failed - SAS token may be expired or invalid",
+                    "details": response.text,
+                    "statusCode": response.status_code,
+                    "endpoint": url,
+                    "troubleshooting": {
+                        "checkSasToken": "Verify IoTHubSasToken in app settings is valid and not expired",
+                        "checkPermissions": "Ensure SAS token has ServiceConnect permissions",
+                        "checkDeviceId": f"Verify device '{device_id}' exists in IoT Hub"
+                    }
+                }),
+                status_code=401,
+                mimetype="application/json"
+            )
+        elif response.status_code == 404:
+            logging.error(f"❌ 404 Device '{device_id}' not found")
+            return func.HttpResponse(
+                json.dumps({
+                    "error": f"Device '{device_id}' not found in IoT Hub",
+                    "statusCode": response.status_code,
+                    "details": response.text,
+                    "endpoint": url,
+                    "suggestion": f"Check if device '{device_id}' exists and is enabled in IoT Hub"
+                }),
+                status_code=404,
+                mimetype="application/json"
+            )
+        else:
+            logging.error(f"❌ IoT Hub API error: {response.status_code} - {response.text}")
+            return func.HttpResponse(
+                json.dumps({
+                    "error": f"IoT Hub API error: {response.status_code}",
+                    "details": response.text,
+                    "statusCode": response.status_code,
+                    "endpoint": url
+                }),
                 status_code=500,
                 mimetype="application/json"
             )
         
+    except requests.exceptions.Timeout:
+        logging.error("❌ Timeout connecting to IoT Hub")
+        return func.HttpResponse(
+            json.dumps({"error": "Timeout connecting to IoT Hub"}),
+            status_code=408,
+            mimetype="application/json"
+        )
     except Exception as e:
-        logging.error(f"Error sending C2D message: {str(e)}")
+        logging.error(f"❌ Error sending C2D message: {str(e)}")
         return func.HttpResponse(
             json.dumps({"error": f"Failed to send C2D message: {str(e)}"}),
             status_code=500,
@@ -155,8 +203,8 @@ def get_available_commands(req: func.HttpRequest) -> func.HttpResponse:
         ],
         "info": {
             "method": "IoT Hub REST API",
-            "authentication": "Azure Function Key",
-            "note": "Using REST API for maximum compatibility"
+            "authentication": "Pre-generated SAS Token + Azure Function Key",
+            "note": "Using pre-generated SAS token for better performance"
         },
         "usage": {
             "endpoint": "/api/send-c2d?code=your-function-key",
