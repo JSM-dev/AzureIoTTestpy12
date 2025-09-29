@@ -12,7 +12,7 @@ on:
 
 env:
   AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
-  PYTHON_VERSION: '3.11' # set this to the python version to use (supports 3.6, 3.7, 3.8)
+  PYTHON_VERSION: '3.11' # set this to the python version to use
 
 jobs:
   build:
@@ -29,25 +29,23 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Create and start virtual environment
-        run: |
-          python -m venv venv
-          source venv/bin/activate
+      # REMOVED: Virtual environment and package installation
+      # Let Azure Functions handle this with remote build
 
-      - name: Install dependencies
+      - name: Validate requirements.txt
         run: |
-          source venv/bin/activate
-          pip install --upgrade pip
-          # Install packages to both locations to ensure they're available
-          pip install -r requirements.txt --target ./.python_packages/lib/site-packages
-          pip install -r requirements.txt
-          # Verify azure-functions is installed
-          python -c "import azure.functions; print('azure-functions successfully installed')"
-
-      # Optional: Add step to run tests here
+          echo "Validating requirements.txt..."
+          cat requirements.txt
+          python -c "
+          with open('requirements.txt', 'r') as f:
+              lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+              print(f'Found {len(lines)} package requirements')
+              for line in lines:
+                  print(f'  - {line}')
+          "
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r -x "venv/*" ".git/*" ".github/*" "__pycache__/*"
+        run: zip release.zip ./* -r -x "venv/*" ".git/*" ".github/*" "__pycache__/*" "*.pyc" ".python_packages/*"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -90,18 +88,14 @@ jobs:
           find . -name "*.py" -type f
           echo "Requirements content:"
           cat requirements.txt
-          echo "Checking .python_packages:"
-          ls -la .python_packages/lib/site-packages/ || echo "No .python_packages found"
-          echo "Looking for azure-cosmos:"
-          find .python_packages/ -name "*cosmos*" || echo "No cosmos packages found"
 
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
         id: deploy-to-function
         with:
-          app-name: 'ISEOS-FA-Py12'
+          app-name: 'iseos-fa-py12'
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          scm-do-build-during-deployment: false
-          enable-oryx-build: false
-           
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_xxx }}
+          scm-do-build-during-deployment: true
+          enable-oryx-build: true
