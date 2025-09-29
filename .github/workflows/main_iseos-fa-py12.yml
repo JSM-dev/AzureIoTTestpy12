@@ -52,20 +52,35 @@ jobs:
           pip list
           echo "Contents of .python_packages:"
           ls -la .python_packages/lib/site-packages/
+          echo "Key packages check:"
+          ls -la .python_packages/lib/site-packages/ | grep -E "(requests|azure)"
 
       - name: Zip artifact for deployment
         run: |
-          # Include .python_packages but exclude venv and other unnecessary files
+          # FIXED: Include .python_packages but exclude venv and other unnecessary files
           zip -r release.zip . -x \
-            "venv/*" ".git/*" ".github/*" "__pycache__/*" "*.pyc" ".python_packages/*"
+            "venv/*" \
+            ".git/*" \
+            ".github/*" \
+            "__pycache__/*" \
+            "*.pyc" \
+            "*.pyo" \
+            ".vscode/*" \
+            ".pytest_cache/*" \
+            "*.log"
+
+      - name: Validate ZIP contents
+        run: |
+          echo "ZIP contents:"
+          unzip -l release.zip | head -30
+          echo "Checking if .python_packages is included:"
+          unzip -l release.zip | grep -E "python_packages|azure|requests" || echo "No packages found in ZIP!"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: |
-            release.zip
-            !venv/
+          path: release.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -100,6 +115,10 @@ jobs:
           find . -name "*.py" -type f
           echo "Requirements content:"
           cat requirements.txt
+          echo ".python_packages contents:"
+          ls -la .python_packages/lib/site-packages/ | head -20
+          echo "Checking for requests package:"
+          ls -la .python_packages/lib/site-packages/ | grep requests || echo "requests not found!"
 
       - name: 'Deploy to Azure Functions'
         uses: Azure/functions-action@v1
@@ -109,5 +128,6 @@ jobs:
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_xxx }}
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
+          # REMOVED: These cause deployment failures on Consumption Plan (or set to false)
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false
