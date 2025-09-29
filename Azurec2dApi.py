@@ -28,6 +28,7 @@ def generate_sas_token(uri, key, policy_name, expiry_hours=1):
     
     # Create the SAS token
     sas_token = f"SharedAccessSignature sr={uri}&sig={urllib.parse.quote(signature)}&se={expiry_timestamp}&skn={policy_name}"
+    logging.info (f"Generated SAS token: {sas_token}")
     return sas_token
 
 @bp_c2dAPI.route(route="send-c2d", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
