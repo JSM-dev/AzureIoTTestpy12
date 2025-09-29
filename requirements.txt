@@ -3,5 +3,5 @@
 
 # azure-monitor-opentelemetry 
 azure-functions>=1.23.0
-azure-iot-hub==2.2.3
+azure-iot-hub==2.5.0
 uamqp==1.6.4
