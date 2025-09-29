@@ -9,7 +9,7 @@ import logging
 
 from azure.functions import Blueprint, HttpRequest, HttpResponse
 
-from httpfunc import bp_c2dAPI
+from Azurec2dApi import  bp_c2dAPI
 from eventhub_blueprint import bp_eventhub 
 
 # Register all blueprints from an array
