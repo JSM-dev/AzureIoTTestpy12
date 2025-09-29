@@ -2,13 +2,13 @@ import azure.functions as func
 import json
 import logging
 from azure.iot.hub import IoTHubRegistryManager
-from datetime import datetime  # Add this import
+from datetime import datetime
 import os
 
 # Create blueprint for C2D messaging
 bp_c2dAPI = func.Blueprint()
 
-@bp_c2dAPI.route(route="send-c2d", methods=["POST"])
+@bp_c2dAPI.route(route="send-c2d", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('C2D message API triggered')
     
@@ -52,13 +52,10 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
             "messageId": message_id,
             "timestamp": datetime.utcnow().isoformat()
         }
+        
         # Send C2D message
         registry_manager = IoTHubRegistryManager(iot_hub_connection_string)
-        
-        # Create the message
         message = json.dumps(c2d_message)
-        
-        # Send cloud-to-device message
         registry_manager.send_c2d_message(device_id, message)
         
         logging.info(f"C2D message sent to device {device_id}: {message}")
@@ -84,7 +81,7 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
 
-@bp_c2dAPI.route(route="device-commands", methods=["GET"])
+@bp_c2dAPI.route(route="device-commands", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
 def get_available_commands(req: func.HttpRequest) -> func.HttpResponse:
     """Return list of available commands for the device"""
     
@@ -110,10 +107,16 @@ def get_available_commands(req: func.HttpRequest) -> func.HttpResponse:
                 "example": {"command": "updateInterval", "value": "T#30S"}
             }
         ],
+        "authentication": {
+            "method": "Azure Function Key",
+            "usage": "Add ?code=your-function-key to URL or use x-functions-key header"
+        },
         "usage": {
-            "endpoint": "/api/send-c2d",
+            "endpoint": "/api/send-c2d?code=your-function-key",
             "method": "POST",
-            "headers": {"Content-Type": "application/json"},
+            "headers": {
+                "Content-Type": "application/json"
+            },
             "body": {
                 "deviceId": "TestBeckhoff",
                 "command": "setTemperature", 
