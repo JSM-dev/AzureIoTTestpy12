@@ -1,1 +1,16 @@
+.git*
+.vscode
 .venv
+__pycache__
+.pytest_cache
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.coverage
+.nyc_output
+node_modules
+.DS_Store
+*.log
+temp_requirements.txt
