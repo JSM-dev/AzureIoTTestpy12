@@ -53,17 +53,17 @@ def get_latest_telemetry(req: func.HttpRequest) -> func.HttpResponse:
         # Get Cosmos DB container
         container = get_cosmos_container()
         
-        # Query for latest telemetry data
+        # Query for latest telemetry data - FIXED: Consistent CamelCase
         query = """
-        SELECT TOP @limit *
+        SELECT TOP @Limit *
         FROM c 
-        WHERE c.DeviceId = @deviceId 
+        WHERE c.DeviceId = @DeviceId 
         ORDER BY c._ts DESC
         """
         
         parameters: List[Dict[str, Any]] = [
-            {"name": "@limit", "value": limit},
-            {"name": "@deviceId", "value": device_id}
+            {"name": "@Limit", "value": limit},
+            {"name": "@DeviceId", "value": device_id}
         ]
         
         items = list(container.query_items(
@@ -125,21 +125,21 @@ def get_telemetry_range(req: func.HttpRequest) -> func.HttpResponse:
         # Get Cosmos DB container
         container = get_cosmos_container()
         
-        # Query for telemetry data in time range
+        # Query for telemetry data in time range - FIXED: Consistent CamelCase
         query = """
-        SELECT TOP @limit *
+        SELECT TOP @Limit *
         FROM c 
-        WHERE c.DeviceId = @deviceId 
-        AND c.Timestamp >= @startTime
-        AND c.Timestamp <= @endTime
+        WHERE c.DeviceId = @DeviceId 
+        AND c.Timestamp >= @StartTime
+        AND c.Timestamp <= @EndTime
         ORDER BY c.Timestamp DESC
         """
         
         parameters: List[Dict[str, Any]] = [
-            {"name": "@limit", "value": limit},
-            {"name": "@deviceId", "value": device_id},
-            {"name": "@startTime", "value": start_time.isoformat()},
-            {"name": "@endTime", "value": end_time.isoformat()}
+            {"name": "@Limit", "value": limit},
+            {"name": "@DeviceId", "value": device_id},
+            {"name": "@StartTime", "value": start_time.isoformat()},
+            {"name": "@EndTime", "value": end_time.isoformat()}
         ]
         
         items = list(container.query_items(
@@ -184,7 +184,7 @@ def get_devices(req: func.HttpRequest) -> func.HttpResponse:
         # Get Cosmos DB container
         container = get_cosmos_container()
         
-        # FIXED: Simple query to get unique device IDs (avoid GROUP BY issues)
+        # Simple query to get unique device IDs
         query = """
         SELECT DISTINCT c.DeviceId
         FROM c 
@@ -200,16 +200,16 @@ def get_devices(req: func.HttpRequest) -> func.HttpResponse:
         for device_item in device_items:
             device_id = device_item['DeviceId']
             
-            # Get latest message for this device
+            # Get latest message for this device - FIXED: Consistent CamelCase
             latest_query = """
             SELECT TOP 1 c.Timestamp, c._ts
             FROM c 
-            WHERE c.DeviceId = @deviceId
+            WHERE c.DeviceId = @DeviceId
             ORDER BY c._ts DESC
             """
             
             parameters: List[Dict[str, Any]] = [
-                {"name": "@deviceId", "value": device_id}
+                {"name": "@DeviceId", "value": device_id}
             ]
             
             latest_items = list(container.query_items(
@@ -271,20 +271,20 @@ def get_telemetry_summary(req: func.HttpRequest) -> func.HttpResponse:
         # Get Cosmos DB container
         container = get_cosmos_container()
         
-        # FIXED: Simple query without aggregations (they cause issues in Cosmos DB)
+        # Simple query without aggregations - FIXED: Consistent CamelCase
         query = """
         SELECT c.Timestamp, c._ts
         FROM c 
-        WHERE c.DeviceId = @deviceId 
-        AND c.Timestamp >= @startTime
-        AND c.Timestamp <= @endTime
+        WHERE c.DeviceId = @DeviceId 
+        AND c.Timestamp >= @StartTime
+        AND c.Timestamp <= @EndTime
         ORDER BY c.Timestamp DESC
         """
         
         parameters: List[Dict[str, Any]] = [
-            {"name": "@deviceId", "value": device_id},
-            {"name": "@startTime", "value": start_time.isoformat()},
-            {"name": "@endTime", "value": end_time.isoformat()}
+            {"name": "@DeviceId", "value": device_id},
+            {"name": "@StartTime", "value": start_time.isoformat()},
+            {"name": "@EndTime", "value": end_time.isoformat()}
         ]
         
         items = list(container.query_items(
