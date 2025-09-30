@@ -3,12 +3,8 @@ import datetime
 import json
 import os
 import logging
-# import requests
-# Cosmos DB imports
-# from azure.cosmos import CosmosClient
 
 from azure.functions import Blueprint, HttpRequest, HttpResponse
-
 from Azurec2dApi import  bp_c2dAPI
 from eventhub_blueprint import bp_eventhub 
 from CosmosDbApi import bp_cosmosAPI

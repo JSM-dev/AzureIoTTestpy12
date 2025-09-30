@@ -67,13 +67,13 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.D
 
     doc = {
         "id": str(uuid.uuid4()),  # Generate unique GUID for document ID
-        "sequenceNumber": azeventhub.sequence_number if hasattr(azeventhub, 'sequence_number') else None,
+        "SequenceNumber": azeventhub.sequence_number if hasattr(azeventhub, 'sequence_number') else None,
         "CustomerId": event_data.get("CustomerId", "default-customer"),  # Required for partition key
         "LocationSiteId": event_data.get("LocationSiteId", "default-location"),  # Required for partition key
-        "eventType": event_data.get("type", "generic"),
+        "EventType": event_data.get("type", "generic"),
         "DeviceId": event_data.get("DeviceId", "default-device"),
-        "body": event_data,
-        "timestamp": datetime.datetime.utcnow().isoformat()
+        "Body": event_data,
+        "Timestamp": datetime.datetime.utcnow().isoformat()
     }
 
     # Write to Cosmos DB using output binding
