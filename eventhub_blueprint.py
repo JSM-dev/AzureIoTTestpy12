@@ -71,6 +71,7 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.D
         "CustomerId": event_data.get("CustomerId", "default-customer"),  # Required for partition key
         "LocationSiteId": event_data.get("LocationSiteId", "default-location"),  # Required for partition key
         "eventType": event_data.get("type", "generic"),
+        "DeviceId": event_data.get("DeviceId", "default-device"),
         "body": event_data,
         "timestamp": datetime.datetime.utcnow().isoformat()
     }
