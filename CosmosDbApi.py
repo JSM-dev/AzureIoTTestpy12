@@ -83,7 +83,13 @@ def get_latest_telemetry(req: func.HttpRequest) -> func.HttpResponse:
                 "Timestamp": datetime.utcnow().isoformat()
             }, indent=2),
             status_code=200,
-            mimetype="application/json"
+                 headers={
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Allow-Credentials': 'false'
+                }
         )
         
     except CosmosHttpResponseError as e:
@@ -95,14 +101,26 @@ def get_latest_telemetry(req: func.HttpRequest) -> func.HttpResponse:
                 "StatusCode": e.status_code
             }),
             status_code=500,
-            mimetype="application/json"
+                headers={
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Allow-Credentials': 'false'
+                }
         )
     except Exception as e:
         logging.error(f"Error fetching telemetry data: {str(e)}")
         return func.HttpResponse(
             json.dumps({"Error": f"Failed to fetch telemetry data: {str(e)}"}),
             status_code=500,
-            mimetype="application/json"
+                headers={
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Allow-Credentials': 'false'
+            }
         )
 
 @bp_cosmosAPI.route(route="telemetry/range", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
@@ -164,7 +182,13 @@ def get_telemetry_range(req: func.HttpRequest) -> func.HttpResponse:
                 "Timestamp": datetime.utcnow().isoformat()
             }, indent=2),
             status_code=200,
-            mimetype="application/json"
+                headers={
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Allow-Credentials': 'false'
+            }
         )
         
     except Exception as e:
@@ -172,7 +196,13 @@ def get_telemetry_range(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({"Error": f"Failed to fetch telemetry range: {str(e)}"}),
             status_code=500,
-            mimetype="application/json"
+                headers={
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Allow-Credentials': 'false'
+            }
         )
 
 @bp_cosmosAPI.route(route="devices", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
@@ -244,7 +274,13 @@ def get_devices(req: func.HttpRequest) -> func.HttpResponse:
                 "Timestamp": datetime.utcnow().isoformat()
             }, indent=2),
             status_code=200,
-            mimetype="application/json"
+            headers={
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Allow-Credentials': 'false'
+            }
         )
         
     except Exception as e:
@@ -252,7 +288,13 @@ def get_devices(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({"Error": f"Failed to fetch devices: {str(e)}"}),
             status_code=500,
-            mimetype="application/json"
+            headers={
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Allow-Credentials': 'false'
+                }
         )
 
 @bp_cosmosAPI.route(route="telemetry/summary", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
@@ -325,7 +367,13 @@ def get_telemetry_summary(req: func.HttpRequest) -> func.HttpResponse:
                 "Timestamp": datetime.utcnow().isoformat()
             }, indent=2),
             status_code=200,
-            mimetype="application/json"
+            headers={
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Allow-Credentials': 'false'
+            }
         )
         
     except Exception as e:
@@ -333,5 +381,11 @@ def get_telemetry_summary(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({"Error": f"Failed to fetch telemetry summary: {str(e)}"}),
             status_code=500,
-            mimetype="application/json"
+            headers={
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                'Access-Control-Allow-Credentials': 'false'
+            }
         )
