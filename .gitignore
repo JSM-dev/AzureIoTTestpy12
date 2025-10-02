@@ -62,3 +62,7 @@ __azurite_db*__.json
 
 # Azure Functions deployment
 .deployment
+
+
+# IoT Dashboard (local only)
+iot-dashboard/
