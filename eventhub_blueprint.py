@@ -61,7 +61,7 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.D
 
     try:
         logging.error('raw log of message: %s', message)
-    except
+    except Exception as e:
         logging.error('Exception during raw log of message')
     # Prepare document to insert
     try:
