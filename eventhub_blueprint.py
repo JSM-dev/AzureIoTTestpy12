@@ -58,6 +58,11 @@ def ISEOS_iot_Handler(azeventhub: func.EventHubEvent, cosmosout: func.Out[func.D
     # Using Azure Functions Cosmos DB Output Binding (no SDK import needed!)
     logging.info("Using Cosmos DB output binding - no package import required")
 
+
+    try:
+        logging.error('raw log of message: %s', message)
+    except
+        logging.error('Exception during raw log of message')
     # Prepare document to insert
     try:
         event_data = json.loads(message)
