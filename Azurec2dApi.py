@@ -18,6 +18,7 @@ def get_cors_headers():
         'Access-Control-Allow-Credentials': 'false'
     }
 
+# OPTIONS handler for preflight requests
 @bp_c2dAPI.route(route="send-c2d", methods=["OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 def send_c2d_options(req: func.HttpRequest) -> func.HttpResponse:
     """Handle preflight OPTIONS request for C2D messaging"""
@@ -29,6 +30,7 @@ def send_c2d_options(req: func.HttpRequest) -> func.HttpResponse:
         headers=get_cors_headers()
     )
 
+# POST handler for actual C2D commands
 @bp_c2dAPI.route(route="send-c2d", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('C2D message API triggered')
@@ -127,16 +129,11 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
                     "success": True,
                     "deviceId": device_id,
                     "command": command,
-                    "value": value,
                     "messageId": message_id,
-                    "message": "C2D message sent successfully",
-                    "method": "IoT Hub REST API (Device-specific endpoint)",
-                    "statusCode": response.status_code,
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "endpoint": url
+                    "message": "C2D message sent successfully"
                 }),
                 status_code=200,
-                headers=get_cors_headers()
+                headers=get_cors_headers()  # ✅ Add CORS headers
             )
         elif response.status_code == 401:
             logging.error(f"❌ 401 Authentication failed")
@@ -168,7 +165,7 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
                     "endpoint": url
                 }),
                 status_code=500,
-                headers=get_cors_headers()
+                headers=get_cors_headers()  # ✅ Add CORS headers
             )
         
     except requests.exceptions.Timeout:
@@ -183,9 +180,10 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({"error": f"Failed to send C2D message: {str(e)}"}),
             status_code=500,
-            headers=get_cors_headers()
+            headers=get_cors_headers()  # ✅ Add CORS headers
         )
 
+# OPTIONS handler for device commands
 @bp_c2dAPI.route(route="device-commands", methods=["OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 def device_commands_options(req: func.HttpRequest) -> func.HttpResponse:
     """Handle preflight OPTIONS request for device commands"""
@@ -197,6 +195,7 @@ def device_commands_options(req: func.HttpRequest) -> func.HttpResponse:
         headers=get_cors_headers()
     )
 
+# GET handler for device commands
 @bp_c2dAPI.route(route="device-commands", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
 def get_available_commands(req: func.HttpRequest) -> func.HttpResponse:
     """Return list of available commands for the device"""
