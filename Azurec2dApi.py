@@ -22,12 +22,19 @@ def get_cors_headers():
 @bp_c2dAPI.route(route="send-c2d", methods=["OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 def send_c2d_options(req: func.HttpRequest) -> func.HttpResponse:
     """Handle preflight OPTIONS request for C2D messaging"""
+    import logging
     logging.info('C2D OPTIONS preflight request received')
     
     return func.HttpResponse(
         "",
         status_code=200,
-        headers=get_cors_headers()
+        headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
+            'Access-Control-Allow-Credentials': 'false',
+            'Access-Control-Max-Age': '86400'
+        }
     )
 
 # POST handler for actual C2D commands
