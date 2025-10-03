@@ -18,6 +18,17 @@ def get_cors_headers():
         'Access-Control-Allow-Credentials': 'false'
     }
 
+@bp_c2dAPI.route(route="send-c2d", methods=["OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+def send_c2d_options(req: func.HttpRequest) -> func.HttpResponse:
+    """Handle preflight OPTIONS request for C2D messaging"""
+    logging.info('C2D OPTIONS preflight request received')
+    
+    return func.HttpResponse(
+        "",
+        status_code=200,
+        headers=get_cors_headers()
+    )
+
 @bp_c2dAPI.route(route="send-c2d", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('C2D message API triggered')
@@ -174,6 +185,17 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             headers=get_cors_headers()
         )
+
+@bp_c2dAPI.route(route="device-commands", methods=["OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+def device_commands_options(req: func.HttpRequest) -> func.HttpResponse:
+    """Handle preflight OPTIONS request for device commands"""
+    logging.info('Device commands OPTIONS preflight request received')
+    
+    return func.HttpResponse(
+        "",
+        status_code=200,
+        headers=get_cors_headers()
+    )
 
 @bp_c2dAPI.route(route="device-commands", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
 def get_available_commands(req: func.HttpRequest) -> func.HttpResponse:
