@@ -8,6 +8,16 @@ import requests
 # Create blueprint for C2D messaging
 bp_c2dAPI = func.Blueprint()
 
+def get_cors_headers():
+    """Get standard CORS headers for all responses"""
+    return {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
+        'Access-Control-Allow-Credentials': 'false'
+    }
+
 @bp_c2dAPI.route(route="send-c2d", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('C2D message API triggered')
@@ -21,26 +31,14 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({"error": "IoTHubHostName not configured in app settings"}),
                 status_code=500,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                    'Access-Control-Allow-Credentials': 'false'
-               }
+                headers=get_cors_headers()
             )
         
         if not sas_token:
             return func.HttpResponse(
                 json.dumps({"error": "IoTHubSasToken not configured in app settings"}),
                 status_code=500,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                    'Access-Control-Allow-Credentials': 'false'
-               }
+                headers=get_cors_headers()
             )
         
         logging.info(f"Using IoT Hub: {iot_hub_hostname}")
@@ -55,13 +53,7 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({"error": "Invalid JSON in request body"}),
                 status_code=400,
-               headers={
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                    'Access-Control-Allow-Credentials': 'false'
-               }
+                headers=get_cors_headers()
             )
         
         # Extract parameters
@@ -76,13 +68,7 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({"error": "Command is required"}),
                 status_code=400,
-                headers={
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Credentials': 'false'
-        }
+                headers=get_cors_headers()
             )
         
         # Build C2D message payload
@@ -132,63 +118,34 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
                     "command": command,
                     "value": value,
                     "messageId": message_id,
-                    "message": "C2D message sent successfully via REST API",
+                    "message": "C2D message sent successfully",
                     "method": "IoT Hub REST API (Device-specific endpoint)",
                     "statusCode": response.status_code,
                     "timestamp": datetime.utcnow().isoformat(),
                     "endpoint": url
                 }),
                 status_code=200,
-                headers={
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Credentials': 'false'
-            }
-                
+                headers=get_cors_headers()
             )
         elif response.status_code == 401:
             logging.error(f"❌ 401 Authentication failed")
             return func.HttpResponse(
                 json.dumps({
-                    "error": "Authentication failed - SAS token may be expired or invalid",
-                    "details": response.text,
-                    "statusCode": response.status_code,
-                    "endpoint": url,
-                    "troubleshooting": {
-                        "checkSasToken": "Verify IoTHubSasToken in app settings is valid and not expired",
-                        "checkPermissions": "Ensure SAS token has ServiceConnect permissions",
-                        "checkDeviceId": f"Verify device '{device_id}' exists in IoT Hub"
-                    }
+                    "error": "Authentication failed",
+                    "statusCode": response.status_code
                 }),
                 status_code=401,
-                headers={
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Credentials': 'false'
-                }
+                headers=get_cors_headers()
             )
         elif response.status_code == 404:
             logging.error(f"❌ 404 Device '{device_id}' not found")
             return func.HttpResponse(
                 json.dumps({
-                    "error": f"Device '{device_id}' not found in IoT Hub",
-                    "statusCode": response.status_code,
-                    "details": response.text,
-                    "endpoint": url,
-                    "suggestion": f"Check if device '{device_id}' exists and is enabled in IoT Hub"
+                    "error": f"Device '{device_id}' not found",
+                    "statusCode": response.status_code
                 }),
                 status_code=404,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                    'Access-Control-Allow-Credentials': 'false'
-               }
+                headers=get_cors_headers()
             )
         else:
             logging.error(f"❌ IoT Hub API error: {response.status_code} - {response.text}")
@@ -200,13 +157,7 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
                     "endpoint": url
                 }),
                 status_code=500,
-                headers={
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Credentials': 'false'
-                }
+                headers=get_cors_headers()
             )
         
     except requests.exceptions.Timeout:
@@ -214,26 +165,14 @@ def send_c2d_message(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({"error": "Timeout connecting to IoT Hub"}),
             status_code=408,
-            headers={
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                    'Access-Control-Allow-Credentials': 'false'
-               }
+            headers=get_cors_headers()
         )
     except Exception as e:
         logging.error(f"❌ Error sending C2D message: {str(e)}")
         return func.HttpResponse(
             json.dumps({"error": f"Failed to send C2D message: {str(e)}"}),
             status_code=500,
-            headers={
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Credentials': 'false'
-                }
+            headers=get_cors_headers()
         )
 
 @bp_c2dAPI.route(route="device-commands", methods=["GET"], auth_level=func.AuthLevel.FUNCTION)
@@ -285,11 +224,5 @@ def get_available_commands(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(
         json.dumps(available_commands, indent=2),
         status_code=200,
-        headers={
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            'Access-Control-Allow-Credentials': 'false'
-        }
+        headers=get_cors_headers()
     )
