@@ -123,8 +123,8 @@ def EventGrid_Handler(azeventhub: List[func.EventHubEvent], cosmosout: func.Out[
 
 def _parse_and_validate_event_data(event_body: str, correlation_id: str) -> Optional[Dict[str, Any]]:
     """
-    Parse and validate EventGrid event data from EventHub.
-    Validates both EventGrid schema and business data fields.
+    Parse and validate EventGrid event data with your specific business data structure.
+    Handles nested JSON with business 'Data' field inside EventGrid 'data' field.
     """
     try:
         event_data = json.loads(event_body)
@@ -133,13 +133,13 @@ def _parse_and_validate_event_data(event_body: str, correlation_id: str) -> Opti
             logging.warning(f"[{correlation_id}] Event data is not a dictionary: {type(event_data)}")
             return None
         
-        # Validate required EventGrid envelope fields (Microsoft EventGrid standard)
+        # Standard EventGrid required fields (automatically added by EventGrid MQTT Broker)
         required_eventgrid_fields = [
-            'eventType',    # Event type (e.g., "Microsoft.Devices.DeviceTelemetry")
-            'subject',      # Resource subject (e.g., "/devices/device-001")
-            'data',         # Business data payload 
-            'eventTime',    # ISO 8601 timestamp
-            'id'            # Unique event identifier
+            'eventType',    # Added by EventGrid (e.g., "Microsoft.EventGrid.MqttMessage")
+            'subject',      # Added by EventGrid (e.g., "/devices/Mqtt2Device")
+            'data',         # Contains your business data
+            'eventTime',    # Added by EventGrid
+            'id'            # Added by EventGrid
         ]
         
         missing_eventgrid_fields = [field for field in required_eventgrid_fields if field not in event_data]
@@ -155,7 +155,7 @@ def _parse_and_validate_event_data(event_body: str, correlation_id: str) -> Opti
             )
             return None
         
-        # Validate that data field contains business payload
+        # Validate your business data structure (inside EventGrid 'data' field)
         business_data = event_data.get('data', {})
         if not isinstance(business_data, dict):
             logging.warning(
@@ -164,8 +164,8 @@ def _parse_and_validate_event_data(event_body: str, correlation_id: str) -> Opti
             )
             return None
         
-        # Apply business data validation (your CustomerId, LocationSiteId, DeviceId requirements)
-        validated_business_data = _apply_required_field_validation(business_data, correlation_id)
+        # Apply validation to your specific business data structure
+        validated_business_data = _apply_business_data_validation(business_data, correlation_id)
         event_data['data'] = validated_business_data
         
         # Sanitize the complete event
@@ -174,8 +174,9 @@ def _parse_and_validate_event_data(event_body: str, correlation_id: str) -> Opti
         logging.debug(
             f"[{correlation_id}] EventGrid validation successful",
             extra={
-                'event_type': event_data['eventType'],
-                'subject': event_data['subject'],
+                'event_type': event_data['eventType'],        # EventGrid field
+                'business_event_type': business_data.get('EventType', 'unknown'),  # Your business field
+                'device_id': business_data.get('DeviceId', 'unknown'),
                 'validation_type': 'success'
             }
         )
@@ -194,6 +195,126 @@ def _parse_and_validate_event_data(event_body: str, correlation_id: str) -> Opti
             extra={'error_type': type(validation_error).__name__}
         )
         return None
+
+
+def _apply_business_data_validation(business_data: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
+    """
+    Validate your specific business data structure with nested Data field.
+    
+    Args:
+        business_data: Your business data (inside EventGrid 'data' field)
+        correlation_id: Correlation ID for logging
+        
+    Returns:
+        Validated business data with defaults applied where needed
+    """
+    validated_data = business_data.copy()
+    
+    # Validate your business fields (not EventGrid fields)
+    sequence_number = validated_data.get('SequenceNumber')
+    if not sequence_number:
+        validated_data['SequenceNumber'] = 0
+        logging.error(f"[{correlation_id}] Missing SequenceNumber - applied default")
+    
+    # Validate CustomerId
+    customer_id = _safe_get_string(validated_data, 'CustomerId')
+    if not customer_id:
+        validated_data['CustomerId'] = 'default-customer'
+        logging.error(f"[{correlation_id}] Missing CustomerId - applied default")
+    else:
+        validated_data['CustomerId'] = _sanitize_field(customer_id)
+    
+    # Validate LocationSiteId  
+    location_id = _safe_get_string(validated_data, 'LocationSiteId')
+    if not location_id:
+        validated_data['LocationSiteId'] = 'default-location'
+        logging.error(f"[{correlation_id}] Missing LocationSiteId - applied default")
+    else:
+        validated_data['LocationSiteId'] = _sanitize_field(location_id)
+    
+    # Validate DeviceId
+    device_id = _safe_get_string(validated_data, 'DeviceId')
+    if not device_id:
+        validated_data['DeviceId'] = 'default-device'
+        logging.error(f"[{correlation_id}] Missing DeviceId - applied default")
+    else:
+        validated_data['DeviceId'] = _sanitize_field(device_id)
+    
+    # Validate your business EventType field (different from EventGrid eventType)
+    business_event_type = _safe_get_string(validated_data, 'EventType')
+    if not business_event_type:
+        validated_data['EventType'] = 'generic'
+        logging.error(f"[{correlation_id}] Missing business EventType - applied default")
+    else:
+        validated_data['EventType'] = _sanitize_field(business_event_type)
+    
+    # Validate your nested Data field structure
+    nested_data = validated_data.get('Data', {})
+    if isinstance(nested_data, dict):
+        # Validate nested Data structure
+        validated_nested_data = _validate_nested_data_structure(nested_data, correlation_id)
+        validated_data['Data'] = validated_nested_data
+    else:
+        logging.warning(f"[{correlation_id}] Business Data field is not a dictionary: {type(nested_data)}")
+        validated_data['Data'] = {}
+    
+    # Validate Timestamp
+    timestamp = validated_data.get('Timestamp')
+    if not timestamp:
+        validated_data['Timestamp'] = datetime.now(timezone.utc).isoformat()
+        logging.error(f"[{correlation_id}] Missing Timestamp - applied current time")
+    
+    # Sanitize the entire business data structure
+    validated_data = _sanitize_data_recursive(validated_data)
+    
+    return validated_data
+
+
+def _validate_nested_data_structure(nested_data: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
+    """
+    Validate the nested Data structure in your business data.
+    
+    Args:
+        nested_data: The nested Data field from your business data
+        correlation_id: Correlation ID for logging
+        
+    Returns:
+        Validated nested data structure
+    """
+    validated_nested = nested_data.copy()
+    
+    # Validate DeviceId in nested Data
+    device_id = _safe_get_string(validated_nested, 'DeviceId')
+    if not device_id:
+        validated_nested['DeviceId'] = 'default-device'
+        logging.error(f"[{correlation_id}] Missing DeviceId in nested Data - applied default")
+    else:
+        validated_nested['DeviceId'] = _sanitize_field(device_id)
+    
+    # Validate ConsumptionData structure
+    consumption_data = validated_nested.get('ConsumptionData', {})
+    if isinstance(consumption_data, dict):
+        # Ensure critical consumption fields exist
+        if 'DeviceId' not in consumption_data:
+            consumption_data['DeviceId'] = validated_nested['DeviceId']
+            logging.info(f"[{correlation_id}] Added DeviceId to ConsumptionData")
+    else:
+        logging.warning(f"[{correlation_id}] ConsumptionData is not a dictionary")
+        validated_nested['ConsumptionData'] = {}
+    
+    # Validate NetworkAnalyser structure
+    network_data = validated_nested.get('NetworkAnalyser', {})
+    if not isinstance(network_data, dict):
+        logging.warning(f"[{correlation_id}] NetworkAnalyser is not a dictionary")
+        validated_nested['NetworkAnalyser'] = {}
+    
+    # Ensure StartTime and StopTime exist
+    if 'StartTime' not in validated_nested:
+        validated_nested['StartTime'] = ""
+    if 'StopTime' not in validated_nested:
+        validated_nested['StopTime'] = ""
+    
+    return validated_nested
 
 
 def _transform_eventgrid_data(event_data: Dict[str, Any], event_metadata: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
@@ -320,50 +441,6 @@ def _apply_event_type_specific_transformations(cosmos_document: Dict[str, Any], 
         )
         # Don't fail the entire transformation for this error
         cosmos_document['category'] = 'TransformationError'
-
-
-def _apply_required_field_validation(data_payload: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
-    """
-    Simple validation with essential security sanitization.
-    Follows Azure Functions best practices for input validation and sanitization.
-    
-    Args:
-        data_payload: The 'data' section of the EventGrid event
-        correlation_id: Correlation ID for logging
-        
-    Returns:
-        Data payload with sanitized fields and defaults applied where needed
-    """
-    validated_data = data_payload.copy()
-    
-    # Sanitize and validate CustomerId
-    customer_id = _safe_get_string(validated_data, 'CustomerId')
-    if not customer_id:
-        validated_data['CustomerId'] = 'default-customer'
-        logging.error(f"[{correlation_id}] Missing or invalid CustomerId - applied default")
-    else:
-        validated_data['CustomerId'] = _sanitize_field(customer_id)
-    
-    # Sanitize and validate LocationSiteId  
-    location_id = _safe_get_string(validated_data, 'LocationSiteId')
-    if not location_id:
-        validated_data['LocationSiteId'] = 'default-location'
-        logging.error(f"[{correlation_id}] Missing or invalid LocationSiteId - applied default")
-    else:
-        validated_data['LocationSiteId'] = _sanitize_field(location_id)
-    
-    # Sanitize and validate DeviceId
-    device_id = _safe_get_string(validated_data, 'DeviceId')
-    if not device_id:
-        validated_data['DeviceId'] = 'default-device'
-        logging.error(f"[{correlation_id}] Missing or invalid DeviceId - applied default")
-    else:
-        validated_data['DeviceId'] = _sanitize_field(device_id)
-    
-    # Sanitize the entire Body for security (recursive sanitization)
-    validated_data = _sanitize_data_recursive(validated_data)
-    
-    return validated_data
 
 
 def _safe_get_string(data: Dict[str, Any], field_name: str) -> str:
