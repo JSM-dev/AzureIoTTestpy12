@@ -18,21 +18,26 @@ bp_eventgridHandler = func.Blueprint()
 )
 @bp_eventgridHandler.cosmos_db_output(
     arg_name="cosmosout",
-    database_name="iseos-iot-db",  # Replace with your database name
-    container_name="telemetry-data",  # Replace with your container name
+    database_name="iseos-iot-db",
+    container_name="telemetry-data",
     connection="CosmosDbConStr",
     create_if_not_exists=True
 )
 def EventGrid_Handler(azeventhub: List[func.EventHubEvent], cosmosout: func.Out[func.DocumentList]):
     """
-    Azure Function to process EventGrid events from EventHub and store in Cosmos DB.
+    Optimized Azure Function to process multi-schema events from EventHub and store in Cosmos DB.
+    
+    Supports:
+    - CloudEvents v1.0 schema (auto-converts to EventGrid)
+    - EventGrid schema (processes directly)
+    - Raw business data (wraps in EventGrid format)
     
     Features:
-    - Batch processing for better performance
-    - Structured logging with correlation IDs
+    - Multi-schema event detection and processing
+    - Comprehensive event inspection logging
+    - Batch processing with correlation tracking
     - Input validation and sanitization
     - Error handling with retry-friendly patterns
-    - Enhanced data transformation
     """
     
     # Generate correlation ID for this batch
@@ -47,53 +52,54 @@ def EventGrid_Handler(azeventhub: List[func.EventHubEvent], cosmosout: func.Out[
     documents_to_insert = []
     
     try:
-        for event in azeventhub:
+        for event_index, event in enumerate(azeventhub):
+            event_correlation_id = f"{correlation_id}_event_{event_index}"
+            
             try:
+                # Comprehensive event inspection for debugging
+                _log_event_inspection(event, event_correlation_id, event_index)
+                
                 # Extract event metadata
                 event_metadata = {
                     'sequence_number': event.sequence_number,
                     'offset': event.offset,
                     'enqueued_time': event.enqueued_time.isoformat() if event.enqueued_time else None,
                     'partition_key': event.partition_key,
-                    'correlation_id': correlation_id
+                    'correlation_id': event_correlation_id
                 }
                 
-                # Parse event body with validation
-                event_data = _parse_and_validate_event_data(event.get_body().decode('utf-8'), correlation_id)
+                # Parse and validate event with multi-schema support
+                event_data = _parse_and_validate_event(event.get_body().decode('utf-8'), event_correlation_id)
                 
                 if event_data is None:
                     error_count += 1
                     continue
                 
                 # Transform data for Cosmos DB
-                cosmos_document = _transform_eventgrid_data(event_data, event_metadata, correlation_id)
+                cosmos_document = _transform_to_cosmos_document(event_data, event_metadata, event_correlation_id)
                 
                 if cosmos_document:
                     documents_to_insert.append(cosmos_document)
                     processed_count += 1
-                    
-                    # Log individual event processing (debug level to avoid noise)
-                    logging.debug(f"[{correlation_id}] Processed event: {event.sequence_number}")
+                    logging.debug(f"[{event_correlation_id}] Event processed successfully")
                 
             except Exception as event_error:
                 error_count += 1
                 logging.error(
-                    f"[{correlation_id}] Error processing individual event {event.sequence_number}: "
-                    f"{str(event_error)}",
+                    f"[{event_correlation_id}] Error processing event {event.sequence_number}: {str(event_error)}",
                     extra={
-                        'correlation_id': correlation_id,
+                        'correlation_id': event_correlation_id,
                         'sequence_number': event.sequence_number,
-                        'error_type': type(event_error).__name__
+                        'error_type': type(event_error).__name__,
+                        'event_index': event_index
                     }
                 )
                 continue
         
-        # Bulk insert to Cosmos DB if we have documents
+        # Bulk insert to Cosmos DB
         if documents_to_insert:
             cosmosout.set(func.DocumentList(documents_to_insert))
-            logging.info(
-                f"[{correlation_id}] Successfully inserted {len(documents_to_insert)} documents to Cosmos DB"
-            )
+            logging.info(f"[{correlation_id}] Successfully inserted {len(documents_to_insert)} documents to Cosmos DB")
         
         # Log batch processing summary
         logging.info(
@@ -111,20 +117,15 @@ def EventGrid_Handler(azeventhub: List[func.EventHubEvent], cosmosout: func.Out[
     except Exception as batch_error:
         logging.error(
             f"[{correlation_id}] Critical error in batch processing: {str(batch_error)}",
-            extra={
-                'correlation_id': correlation_id,
-                'error_type': type(batch_error).__name__,
-                'batch_size': batch_size
-            }
+            extra={'correlation_id': correlation_id, 'error_type': type(batch_error).__name__, 'batch_size': batch_size}
         )
-        # Re-raise for retry mechanisms
         raise
 
 
-def _parse_and_validate_event_data(event_body: str, correlation_id: str) -> Optional[Dict[str, Any]]:
+def _parse_and_validate_event(event_body: str, correlation_id: str) -> Optional[Dict[str, Any]]:
     """
-    Parse and validate EventGrid event data with your specific business data structure.
-    Handles nested JSON with business 'Data' field inside EventGrid 'data' field.
+    Parse and validate events with multi-schema support (CloudEvents v1.0, EventGrid, Raw Data).
+    Optimized single function replacing multiple parsing implementations.
     """
     try:
         event_data = json.loads(event_body)
@@ -133,257 +134,271 @@ def _parse_and_validate_event_data(event_body: str, correlation_id: str) -> Opti
             logging.warning(f"[{correlation_id}] Event data is not a dictionary: {type(event_data)}")
             return None
         
-        # Standard EventGrid required fields (automatically added by EventGrid MQTT Broker)
-        required_eventgrid_fields = [
-            'eventType',    # Added by EventGrid (e.g., "Microsoft.EventGrid.MqttMessage")
-            'subject',      # Added by EventGrid (e.g., "/devices/Mqtt2Device")
-            'data',         # Contains your business data
-            'eventTime',    # Added by EventGrid
-            'id'            # Added by EventGrid
-        ]
+        # Detect schema format and process accordingly
+        schema_format = _detect_schema_format(event_data)
         
-        missing_eventgrid_fields = [field for field in required_eventgrid_fields if field not in event_data]
-        
-        if missing_eventgrid_fields:
-            logging.warning(
-                f"[{correlation_id}] Missing required EventGrid fields: {missing_eventgrid_fields}",
-                extra={
-                    'missing_fields': missing_eventgrid_fields, 
-                    'available_fields': list(event_data.keys()),
-                    'validation_type': 'eventgrid_schema'
-                }
-            )
-            return None
-        
-        # Validate your business data structure (inside EventGrid 'data' field)
-        business_data = event_data.get('data', {})
-        if not isinstance(business_data, dict):
-            logging.warning(
-                f"[{correlation_id}] EventGrid 'data' field is not a dictionary: {type(business_data)}",
-                extra={'validation_type': 'business_data_format'}
-            )
-            return None
-        
-        # Apply validation to your specific business data structure
-        validated_business_data = _apply_business_data_validation(business_data, correlation_id)
-        event_data['data'] = validated_business_data
-        
-        # Sanitize the complete event
-        _sanitize_event_data(event_data)
-        
-        logging.debug(
-            f"[{correlation_id}] EventGrid validation successful",
-            extra={
-                'event_type': event_data['eventType'],        # EventGrid field
-                'business_event_type': business_data.get('EventType', 'unknown'),  # Your business field
-                'device_id': business_data.get('DeviceId', 'unknown'),
-                'validation_type': 'success'
-            }
-        )
-        
-        return event_data
+        if schema_format == 'cloudevents_v1.0':
+            logging.info(f"[{correlation_id}] Processing CloudEvents v1.0 schema")
+            return _process_cloudevents(event_data, correlation_id)
+        elif schema_format == 'eventgrid':
+            logging.info(f"[{correlation_id}] Processing EventGrid schema")
+            return _process_eventgrid(event_data, correlation_id)
+        else:
+            logging.info(f"[{correlation_id}] Processing raw business data - creating EventGrid wrapper")
+            return _process_raw_data(event_data, correlation_id)
         
     except json.JSONDecodeError as json_error:
         logging.error(
             f"[{correlation_id}] JSON decode error: {str(json_error)}",
-            extra={'event_body_preview': event_body[:200] if event_body else 'Empty'}
+            extra={'event_body_preview': event_body[:200] if event_body else 'Empty', 'error_type': 'json_decode_error'}
         )
         return None
     except Exception as validation_error:
         logging.error(
-            f"[{correlation_id}] EventGrid validation error: {str(validation_error)}",
+            f"[{correlation_id}] Event validation error: {str(validation_error)}",
             extra={'error_type': type(validation_error).__name__}
         )
         return None
 
 
-def _apply_business_data_validation(business_data: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
+def _detect_schema_format(data: Dict[str, Any]) -> str:
     """
-    Validate your specific business data structure with nested Data field.
+    Optimized schema detection for CloudEvents v1.0, EventGrid, and raw business data.
+    """
+    # CloudEvents v1.0 detection
+    if ('type' in data and 'source' in data and 'id' in data and 
+        data.get('specversion', '').startswith('1.0')):
+        return 'cloudevents_v1.0'
     
-    Args:
-        business_data: Your business data (inside EventGrid 'data' field)
-        correlation_id: Correlation ID for logging
+    # EventGrid schema detection
+    eventgrid_fields = ['eventType', 'subject', 'data', 'eventTime', 'id']
+    if sum(1 for field in eventgrid_fields if field in data) >= 4:
+        return 'eventgrid'
+    
+    # Default to raw business data
+    return 'raw_business_data'
+
+
+def _process_cloudevents(event_data: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Process CloudEvents v1.0 schema and convert to EventGrid format.
+    """
+    try:
+        # Validate required CloudEvents fields
+        required_fields = ['type', 'source', 'id', 'specversion']
+        missing_fields = [field for field in required_fields if field not in event_data]
         
-    Returns:
-        Validated business data with defaults applied where needed
+        if missing_fields:
+            logging.warning(
+                f"[{correlation_id}] Missing CloudEvents fields: {missing_fields}",
+                extra={'missing_fields': missing_fields, 'validation_type': 'cloudevents_validation'}
+            )
+            return None
+        
+        # Extract and validate business data
+        business_data = event_data.get('data', {})
+        validated_business_data = _validate_business_data(business_data, correlation_id)
+        
+        # Convert to EventGrid format
+        eventgrid_event = {
+            'eventType': event_data.get('type', 'Microsoft.EventGrid.CloudEvent'),
+            'subject': event_data.get('source', '/unknown'),
+            'data': validated_business_data,
+            'eventTime': event_data.get('time', datetime.now(timezone.utc).isoformat()),
+            'id': event_data.get('id', str(uuid.uuid4())),
+            'dataVersion': event_data.get('datacontenttype', '1.0'),
+            'metadataVersion': '1'
+        }
+        
+        _sanitize_event_data(eventgrid_event)
+        
+        logging.info(
+            f"[{correlation_id}] CloudEvents converted to EventGrid format",
+            extra={
+                'original_type': event_data.get('type'),
+                'converted_eventType': eventgrid_event['eventType'],
+                'validation_type': 'cloudevents_converted'
+            }
+        )
+        
+        return eventgrid_event
+        
+    except Exception as conversion_error:
+        logging.error(
+            f"[{correlation_id}] CloudEvents conversion failed: {str(conversion_error)}",
+            extra={'error_type': type(conversion_error).__name__}
+        )
+        return None
+
+
+def _process_eventgrid(event_data: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Process EventGrid schema events.
+    """
+    try:
+        # Validate required EventGrid fields
+        required_fields = ['eventType', 'subject', 'data', 'eventTime', 'id']
+        missing_fields = [field for field in required_fields if field not in event_data]
+        
+        if missing_fields:
+            logging.warning(
+                f"[{correlation_id}] Missing EventGrid fields: {missing_fields}",
+                extra={'missing_fields': missing_fields, 'validation_type': 'eventgrid_validation'}
+            )
+            return None
+        
+        # Validate business data
+        business_data = event_data.get('data', {})
+        if isinstance(business_data, dict):
+            validated_business_data = _validate_business_data(business_data, correlation_id)
+            event_data['data'] = validated_business_data
+        
+        _sanitize_event_data(event_data)
+        
+        logging.debug(
+            f"[{correlation_id}] EventGrid event validated successfully",
+            extra={'event_type': event_data['eventType'], 'validation_type': 'eventgrid_success'}
+        )
+        
+        return event_data
+        
+    except Exception as validation_error:
+        logging.error(
+            f"[{correlation_id}] EventGrid validation failed: {str(validation_error)}",
+            extra={'error_type': type(validation_error).__name__}
+        )
+        return None
+
+
+def _process_raw_data(business_data: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Process raw business data and wrap in EventGrid format.
+    """
+    try:
+        validated_business_data = _validate_business_data(business_data, correlation_id)
+        
+        # Create EventGrid wrapper
+        eventgrid_event = {
+            'eventType': f"Custom.Business.{validated_business_data.get('EventType', 'Generic')}",
+            'subject': f"/devices/{validated_business_data.get('DeviceId', 'unknown')}",
+            'data': validated_business_data,
+            'eventTime': datetime.now(timezone.utc).isoformat(),
+            'id': validated_business_data.get('id', str(uuid.uuid4())),
+            'dataVersion': '1.0',
+            'metadataVersion': '1'
+        }
+        
+        _sanitize_event_data(eventgrid_event)
+        
+        logging.info(
+            f"[{correlation_id}] Raw data wrapped in EventGrid format",
+            extra={
+                'created_eventType': eventgrid_event['eventType'],
+                'device_id': validated_business_data.get('DeviceId'),
+                'validation_type': 'raw_data_wrapped'
+            }
+        )
+        
+        return eventgrid_event
+        
+    except Exception as wrap_error:
+        logging.error(
+            f"[{correlation_id}] Raw data wrapping failed: {str(wrap_error)}",
+            extra={'error_type': type(wrap_error).__name__}
+        )
+        return None
+
+
+def _validate_business_data(business_data: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
+    """
+    Optimized business data validation with required field defaults.
     """
     validated_data = business_data.copy()
     
-    # Validate your business fields (not EventGrid fields)
-    sequence_number = validated_data.get('SequenceNumber')
-    if not sequence_number:
-        validated_data['SequenceNumber'] = 0
-        logging.error(f"[{correlation_id}] Missing SequenceNumber - applied default")
+    # Ensure required fields with defaults
+    field_defaults = {
+        'id': str(uuid.uuid4()),
+        'SequenceNumber': 0,
+        'CustomerId': 'default-customer',
+        'LocationSiteId': 'default-location',
+        'DeviceId': 'default-device',
+        'EventType': 'generic',
+        'Timestamp': datetime.now(timezone.utc).isoformat()
+    }
     
-    # Validate CustomerId
-    customer_id = _safe_get_string(validated_data, 'CustomerId')
-    if not customer_id:
-        validated_data['CustomerId'] = 'default-customer'
-        logging.error(f"[{correlation_id}] Missing CustomerId - applied default")
-    else:
-        validated_data['CustomerId'] = _sanitize_field(customer_id)
+    for field, default_value in field_defaults.items():
+        if field not in validated_data or not validated_data[field]:
+            validated_data[field] = default_value
+            logging.debug(f"[{correlation_id}] Applied default for {field}")
     
-    # Validate LocationSiteId  
-    location_id = _safe_get_string(validated_data, 'LocationSiteId')
-    if not location_id:
-        validated_data['LocationSiteId'] = 'default-location'
-        logging.error(f"[{correlation_id}] Missing LocationSiteId - applied default")
-    else:
-        validated_data['LocationSiteId'] = _sanitize_field(location_id)
+    # Sanitize string fields
+    string_fields = ['CustomerId', 'LocationSiteId', 'DeviceId', 'EventType']
+    for field in string_fields:
+        if isinstance(validated_data[field], str):
+            validated_data[field] = _sanitize_field(validated_data[field])
     
-    # Validate DeviceId
-    device_id = _safe_get_string(validated_data, 'DeviceId')
-    if not device_id:
-        validated_data['DeviceId'] = 'default-device'
-        logging.error(f"[{correlation_id}] Missing DeviceId - applied default")
+    # Validate nested Data structure
+    if 'Data' in validated_data and isinstance(validated_data['Data'], dict):
+        nested_data = validated_data['Data']
+        if 'DeviceId' not in nested_data:
+            nested_data['DeviceId'] = validated_data['DeviceId']
+        
+        # Ensure consumption and network data structures exist
+        if 'ConsumptionData' not in nested_data or not isinstance(nested_data['ConsumptionData'], dict):
+            nested_data['ConsumptionData'] = {}
+        if 'NetworkAnalyser' not in nested_data or not isinstance(nested_data['NetworkAnalyser'], dict):
+            nested_data['NetworkAnalyser'] = {}
     else:
-        validated_data['DeviceId'] = _sanitize_field(device_id)
-    
-    # Validate your business EventType field (different from EventGrid eventType)
-    business_event_type = _safe_get_string(validated_data, 'EventType')
-    if not business_event_type:
-        validated_data['EventType'] = 'generic'
-        logging.error(f"[{correlation_id}] Missing business EventType - applied default")
-    else:
-        validated_data['EventType'] = _sanitize_field(business_event_type)
-    
-    # Validate your nested Data field structure
-    nested_data = validated_data.get('Data', {})
-    if isinstance(nested_data, dict):
-        # Validate nested Data structure
-        validated_nested_data = _validate_nested_data_structure(nested_data, correlation_id)
-        validated_data['Data'] = validated_nested_data
-    else:
-        logging.warning(f"[{correlation_id}] Business Data field is not a dictionary: {type(nested_data)}")
         validated_data['Data'] = {}
     
-    # Validate Timestamp
-    timestamp = validated_data.get('Timestamp')
-    if not timestamp:
-        validated_data['Timestamp'] = datetime.now(timezone.utc).isoformat()
-        logging.error(f"[{correlation_id}] Missing Timestamp - applied current time")
-    
-    # Sanitize the entire business data structure
-    validated_data = _sanitize_data_recursive(validated_data)
-    
-    return validated_data
+    return _sanitize_data_recursive(validated_data)
 
 
-def _validate_nested_data_structure(nested_data: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
+def _transform_to_cosmos_document(event_data: Dict[str, Any], event_metadata: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
     """
-    Validate the nested Data structure in your business data.
-    
-    Args:
-        nested_data: The nested Data field from your business data
-        correlation_id: Correlation ID for logging
-        
-    Returns:
-        Validated nested data structure
-    """
-    validated_nested = nested_data.copy()
-    
-    # Validate DeviceId in nested Data
-    device_id = _safe_get_string(validated_nested, 'DeviceId')
-    if not device_id:
-        validated_nested['DeviceId'] = 'default-device'
-        logging.error(f"[{correlation_id}] Missing DeviceId in nested Data - applied default")
-    else:
-        validated_nested['DeviceId'] = _sanitize_field(device_id)
-    
-    # Validate ConsumptionData structure
-    consumption_data = validated_nested.get('ConsumptionData', {})
-    if isinstance(consumption_data, dict):
-        # Ensure critical consumption fields exist
-        if 'DeviceId' not in consumption_data:
-            consumption_data['DeviceId'] = validated_nested['DeviceId']
-            logging.info(f"[{correlation_id}] Added DeviceId to ConsumptionData")
-    else:
-        logging.warning(f"[{correlation_id}] ConsumptionData is not a dictionary")
-        validated_nested['ConsumptionData'] = {}
-    
-    # Validate NetworkAnalyser structure
-    network_data = validated_nested.get('NetworkAnalyser', {})
-    if not isinstance(network_data, dict):
-        logging.warning(f"[{correlation_id}] NetworkAnalyser is not a dictionary")
-        validated_nested['NetworkAnalyser'] = {}
-    
-    # Ensure StartTime and StopTime exist
-    if 'StartTime' not in validated_nested:
-        validated_nested['StartTime'] = ""
-    if 'StopTime' not in validated_nested:
-        validated_nested['StopTime'] = ""
-    
-    return validated_nested
-
-
-def _transform_eventgrid_data(event_data: Dict[str, Any], event_metadata: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Transform EventGrid event data for Cosmos DB storage.
-    Enhanced to use validated data with required fields.
-    
-    Args:
-        event_data: Parsed and validated event data
-        event_metadata: Event metadata from EventHub
-        correlation_id: Correlation ID for logging
-        
-    Returns:
-        Transformed document for Cosmos DB or None if transformation fails
+    Optimized transformation to Cosmos DB document format.
     """
     try:
-        # Extract validated data payload
         data_payload = event_data.get('data', {})
         
-        # Create Cosmos DB document with validated required fields (matching your EventHub handler pattern)
         cosmos_document = {
             # Standard Cosmos DB fields
-            'id': str(uuid.uuid4()),  # Unique document ID
+            'id': str(uuid.uuid4()),
             
-            # Required business fields with validated defaults (matching your EventHub handler)
-            'CustomerId': data_payload.get('CustomerId', 'default-customer'),        # Required for partition key
-            'LocationSiteId': data_payload.get('LocationSiteId', 'default-location'), # Required for partition key
-            'DeviceId': data_payload.get('DeviceId', 'default-device'),              # Required for device tracking
+            # Required business fields
+            'CustomerId': data_payload.get('CustomerId', 'default-customer'),
+            'LocationSiteId': data_payload.get('LocationSiteId', 'default-location'),
+            'DeviceId': data_payload.get('DeviceId', 'default-device'),
             
-            # EventGrid specific fields
-            'EventType': event_data.get('eventType'),      # Matches your EventHub handler pattern
+            # EventGrid fields
+            'EventType': event_data.get('eventType'),
             'Subject': event_data.get('subject'),
             'EventTime': event_data.get('eventTime'),
             'DataVersion': event_data.get('dataVersion'),
             'MetadataVersion': event_data.get('metadataVersion'),
             
-            # Complete event data payload (matches your EventHub handler pattern)
+            # Complete payload and metadata
             'Body': data_payload,
-            
-            # Processing metadata (matches your EventHub handler pattern)
-            'Timestamp': datetime.now(timezone.utc).isoformat(),  # Matches your EventHub handler
+            'Timestamp': datetime.now(timezone.utc).isoformat(),
             'CorrelationId': correlation_id,
             'Source': 'EventGrid',
             'FunctionName': 'EventGrid_Handler',
-            
-            # EventHub metadata (matches your EventHub handler pattern)
-            'SequenceNumber': event_metadata.get('sequence_number'),  # Matches your EventHub handler
+            'SequenceNumber': event_metadata.get('sequence_number'),
             'EventHub': {
                 'offset': event_metadata.get('offset'),
                 'enqueuedTime': event_metadata.get('enqueued_time'),
                 'partitionKey': event_metadata.get('partition_key')
             },
-            
-            # Additional processing fields
             'ProcessingVersion': '1.0',
             'Environment': os.getenv('AZURE_FUNCTIONS_ENVIRONMENT', 'Development')
         }
         
-        # Add custom transformations based on event type
-        _apply_event_type_specific_transformations(cosmos_document, event_data, correlation_id)
-        
-        # Log successful transformation
         logging.debug(
             f"[{correlation_id}] Document transformed successfully",
             extra={
                 'document_id': cosmos_document['id'],
                 'customer_id': cosmos_document['CustomerId'],
-                'device_id': cosmos_document['DeviceId'],
-                'event_type': cosmos_document['EventType']
+                'device_id': cosmos_document['DeviceId']
             }
         )
         
@@ -391,117 +406,75 @@ def _transform_eventgrid_data(event_data: Dict[str, Any], event_metadata: Dict[s
         
     except Exception as transform_error:
         logging.error(
-            f"[{correlation_id}] Data transformation error: {str(transform_error)}",
-            extra={
-                'error_type': type(transform_error).__name__,
-                'event_type': event_data.get('eventType', 'unknown')
-            }
+            f"[{correlation_id}] Document transformation failed: {str(transform_error)}",
+            extra={'error_type': type(transform_error).__name__}
         )
         return None
 
 
-def _apply_event_type_specific_transformations(cosmos_document: Dict[str, Any], event_data: Dict[str, Any], correlation_id: str) -> None:
+def _log_event_inspection(event: func.EventHubEvent, correlation_id: str, event_index: int) -> None:
     """
-    Apply event-type specific transformations.
-    
-    Args:
-        cosmos_document: Document being prepared for Cosmos DB
-        event_data: Original event data
-        correlation_id: Correlation ID for logging
+    Optimized event inspection logging for debugging.
     """
-    event_type = event_data.get('eventType', '')
-    
     try:
-        # Add transformations based on EventGrid event types
-        if 'Microsoft.Devices.DeviceConnected' in event_type:
-            cosmos_document['deviceConnectionStatus'] = 'Connected'
-            cosmos_document['category'] = 'DeviceLifecycle'
-            
-        elif 'Microsoft.Devices.DeviceDisconnected' in event_type:
-            cosmos_document['deviceConnectionStatus'] = 'Disconnected'
-            cosmos_document['category'] = 'DeviceLifecycle'
-            
-        elif 'Microsoft.Devices.DeviceTelemetry' in event_type:
-            cosmos_document['category'] = 'Telemetry'
-            # Extract device ID if available
-            if 'deviceId' in event_data.get('data', {}):
-                cosmos_document['deviceId'] = event_data['data']['deviceId']
-                
-        elif 'Microsoft.EventGrid.SubscriptionValidationEvent' in event_type:
-            cosmos_document['category'] = 'EventGridValidation'
-            
-        else:
-            cosmos_document['category'] = 'Other'
-            logging.debug(f"[{correlation_id}] Unhandled event type: {event_type}")
-            
-    except Exception as transformation_error:
-        logging.warning(
-            f"[{correlation_id}] Event type transformation failed: {str(transformation_error)}",
-            extra={'event_type': event_type}
-        )
-        # Don't fail the entire transformation for this error
-        cosmos_document['category'] = 'TransformationError'
-
-
-def _safe_get_string(data: Dict[str, Any], field_name: str) -> str:
-    """
-    Safely extract string field with type validation.
-    
-    Args:
-        data: Dictionary to extract from
-        field_name: Field name to extract
+        raw_body = event.get_body().decode('utf-8')
         
-    Returns:
-        String value or empty string if invalid
-    """
-    value = data.get(field_name, '')
-    if not isinstance(value, str):
-        return str(value) if value is not None else ''
-    return value.strip()
+        # Basic payload analysis
+        payload_info = {'raw_length': len(raw_body), 'is_valid_json': False}
+        
+        try:
+            parsed_payload = json.loads(raw_body)
+            if isinstance(parsed_payload, dict):
+                schema_format = _detect_schema_format(parsed_payload)
+                payload_info.update({
+                    'is_valid_json': True,
+                    'schema_format': schema_format,
+                    'total_keys': len(parsed_payload.keys()),
+                    'top_level_keys': list(parsed_payload.keys())[:10]  # First 10 keys
+                })
+        except json.JSONDecodeError:
+            payload_info['json_error'] = 'Invalid JSON'
+        
+        logging.info(
+            f"[{correlation_id}] Event {event_index + 1} inspection",
+            extra={
+                'correlation_id': correlation_id,
+                'event_index': event_index,
+                'sequence_number': event.sequence_number,
+                'payload_info': payload_info,
+                'raw_preview': _sanitize_field(raw_body[:300])  # First 300 chars
+            }
+        )
+        
+    except Exception as inspection_error:
+        logging.error(
+            f"[{correlation_id}] Event inspection failed: {str(inspection_error)}",
+            extra={'correlation_id': correlation_id, 'event_index': event_index}
+        )
 
 
 def _sanitize_field(value: str) -> str:
     """
-    Lightweight field sanitization following Azure Functions security best practices.
-    
-    Args:
-        value: String value to sanitize
-        
-    Returns:
-        Sanitized string value
+    Optimized field sanitization for security.
     """
     if not isinstance(value, str):
         value = str(value)
     
-    # Remove dangerous characters for security
-    sanitized = value.replace('\x00', '')      # Null bytes (injection prevention)
-    sanitized = sanitized.replace('\r', '')    # Carriage returns (log injection prevention) 
-    sanitized = sanitized.replace('\n', '')    # Newlines (log injection prevention)
-    sanitized = sanitized.replace('\t', ' ')   # Tabs to spaces (normalization)
-    
-    # Remove other control characters that could cause issues
+    # Remove dangerous characters
+    sanitized = value.replace('\x00', '').replace('\r', '').replace('\n', '').replace('\t', ' ')
     sanitized = ''.join(char for char in sanitized if ord(char) >= 32 or char == ' ')
     
-    # Trim whitespace and limit length for DoS prevention
-    sanitized = sanitized.strip()[:255]
-    
-    return sanitized
+    return sanitized.strip()[:255]  # Limit length
 
 
 def _sanitize_data_recursive(data: Any) -> Any:
     """
-    Recursively sanitize data structures for comprehensive security.
-    
-    Args:
-        data: Data to sanitize (dict, list, str, or other)
-        
-    Returns:
-        Sanitized data structure
+    Optimized recursive data sanitization.
     """
     if isinstance(data, dict):
         return {key: _sanitize_data_recursive(value) for key, value in data.items()}
     elif isinstance(data, list):
-        return [_sanitize_data_recursive(item) for item in data]
+        return [_sanitize_data_recursive(item) for item in data[:100]]  # Limit list size
     elif isinstance(data, str):
         return _sanitize_field(data)
     else:
@@ -510,12 +483,7 @@ def _sanitize_data_recursive(data: Any) -> Any:
 
 def _sanitize_event_data(event_data: Dict[str, Any]) -> None:
     """
-    Sanitize event data in-place with enhanced security.
-    Updated to follow Azure Functions security best practices.
-    
-    Args:
-        event_data: Event data dictionary to sanitize
+    Optimized in-place event data sanitization.
     """
-    # Sanitize the entire event data structure
     for key, value in event_data.items():
         event_data[key] = _sanitize_data_recursive(value)
