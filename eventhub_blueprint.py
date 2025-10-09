@@ -6,16 +6,16 @@ import os
 import uuid
 
 
-bp_eventhub = func.Blueprint()
+bp_eventhubHandler = func.Blueprint()
 
 
-@bp_eventhub.event_hub_message_trigger(
+@bp_eventhubHandler.event_hub_message_trigger(
     arg_name="azeventhub",
     event_hub_name='EventHubName',
     connection="EventHubConStr",
     consumer_group='$Default'
 )
-@bp_eventhub.cosmos_db_output(
+@bp_eventhubHandler.cosmos_db_output(
     arg_name="cosmosout",
     database_name=os.environ.get('CosmosDbDatabase', 'EOKS-db-prod'),
     container_name=os.environ.get('CosmosDbContainer', 'Container1'),
