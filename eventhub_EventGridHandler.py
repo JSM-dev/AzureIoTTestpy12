@@ -18,9 +18,9 @@ bp_eventgridHandler = func.Blueprint()
 )
 @bp_eventgridHandler.cosmos_db_output(
     arg_name="cosmosout",
-    database_name="iseos-iot-db",
-    container_name="telemetry-data",
-    connection="CosmosDbConStr",
+    database_name=os.environ.get('CosmosDbDatabase', 'EOKS-db-prod'),
+    container_name=os.environ.get('CosmosDbContainer', 'Container1'),
+    connection="CosmosDbConnectionString",
     create_if_not_exists=True
 )
 def EventGrid_Handler(azeventhub: List[func.EventHubEvent], cosmosout: func.Out[func.DocumentList]):
