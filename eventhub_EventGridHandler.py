@@ -182,6 +182,7 @@ def _detect_schema_format(data: Dict[str, Any]) -> str:
 def _process_cloudevents(event_data: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
     """
     Process CloudEvents v1.0 schema and convert to EventGrid format.
+    FIXED: Properly extract and preserve MQTT payload data.
     """
     try:
         # Validate required CloudEvents fields
@@ -195,15 +196,28 @@ def _process_cloudevents(event_data: Dict[str, Any], correlation_id: str) -> Opt
             )
             return None
         
-        # Extract and validate business data
+        # ✅ FIXED: Properly extract MQTT business data from CloudEvents
         business_data = event_data.get('data', {})
-        validated_business_data = _validate_business_data(business_data, correlation_id)
+        
+        # ✅ ADD: Debug logging to see actual CloudEvents structure
+        logging.info(
+            f"[{correlation_id}] CloudEvents data extraction debug",
+            extra={
+                'cloudevents_keys': list(event_data.keys()),
+                'data_field_type': type(business_data).__name__,
+                'data_field_keys': list(business_data.keys()) if isinstance(business_data, dict) else 'not_dict',
+                'raw_data_preview': str(business_data)[:300] if business_data else 'empty'
+            }
+        )
+        
+        # ✅ FIXED: Validate business data WITHOUT overriding existing values
+        validated_business_data = _validate_business_data_preserve_original(business_data, correlation_id)
         
         # Convert to EventGrid format
         eventgrid_event = {
             'eventType': event_data.get('type', 'Microsoft.EventGrid.CloudEvent'),
             'subject': event_data.get('source', '/unknown'),
-            'data': validated_business_data,
+            'data': validated_business_data,  # ✅ FIXED: Use properly validated data
             'eventTime': event_data.get('time', datetime.now(timezone.utc).isoformat()),
             'id': event_data.get('id', str(uuid.uuid4())),
             'dataVersion': event_data.get('datacontenttype', '1.0'),
@@ -217,6 +231,9 @@ def _process_cloudevents(event_data: Dict[str, Any], correlation_id: str) -> Opt
             extra={
                 'original_type': event_data.get('type'),
                 'converted_eventType': eventgrid_event['eventType'],
+                'preserved_device_id': validated_business_data.get('DeviceId'),
+                'preserved_customer_id': validated_business_data.get('CustomerId'),
+                'preserved_location_id': validated_business_data.get('LocationSiteId'),
                 'validation_type': 'cloudevents_converted'
             }
         )
@@ -309,13 +326,15 @@ def _process_raw_data(business_data: Dict[str, Any], correlation_id: str) -> Opt
         return None
 
 
-def _validate_business_data(business_data: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
+def _validate_business_data_preserve_original(business_data: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
     """
-    Optimized business data validation with required field defaults.
+    ✅ FIXED: Business data validation that PRESERVES original MQTT values.
+    Only applies defaults for truly missing or empty fields.
     """
-    validated_data = business_data.copy()
+    # Start with original data
+    validated_data = business_data.copy() if isinstance(business_data, dict) else {}
     
-    # Ensure required fields with defaults
+    # ✅ FIXED: Only apply defaults for missing or empty fields
     field_defaults = {
         'id': str(uuid.uuid4()),
         'SequenceNumber': 0,
@@ -326,32 +345,70 @@ def _validate_business_data(business_data: Dict[str, Any], correlation_id: str) 
         'Timestamp': datetime.now(timezone.utc).isoformat()
     }
     
-    for field, default_value in field_defaults.items():
-        if field not in validated_data or not validated_data[field]:
-            validated_data[field] = default_value
-            logging.debug(f"[{correlation_id}] Applied default for {field}")
+    # ✅ FIXED: Preserve original values, only use defaults when truly missing
+    applied_defaults = []
+    preserved_values = []
     
-    # Sanitize string fields
+    for field, default_value in field_defaults.items():
+        if field not in validated_data or validated_data[field] is None or validated_data[field] == "":
+            validated_data[field] = default_value
+            applied_defaults.append(field)
+        else:
+            preserved_values.append(field)
+    
+    # ✅ ADD: Log what was preserved vs defaulted
+    logging.info(
+        f"[{correlation_id}] Business data validation results",
+        extra={
+            'preserved_fields': preserved_values,
+            'defaulted_fields': applied_defaults,
+            'original_keys': list(business_data.keys()) if isinstance(business_data, dict) else [],
+            'final_device_id': validated_data.get('DeviceId'),
+            'final_customer_id': validated_data.get('CustomerId'),
+            'final_location_id': validated_data.get('LocationSiteId')
+        }
+    )
+    
+    # ✅ FIXED: Sanitize string fields while preserving values
     string_fields = ['CustomerId', 'LocationSiteId', 'DeviceId', 'EventType']
     for field in string_fields:
-        if isinstance(validated_data[field], str):
+        if field in validated_data and isinstance(validated_data[field], str):
+            original_value = validated_data[field]
             validated_data[field] = _sanitize_field(validated_data[field])
+            if original_value != validated_data[field]:
+                logging.debug(f"[{correlation_id}] Sanitized {field}: '{original_value}' -> '{validated_data[field]}'")
     
-    # Validate nested Data structure
-    if 'Data' in validated_data and isinstance(validated_data['Data'], dict):
-        nested_data = validated_data['Data']
-        if 'DeviceId' not in nested_data:
-            nested_data['DeviceId'] = validated_data['DeviceId']
-        
-        # Ensure consumption and network data structures exist
-        if 'ConsumptionData' not in nested_data or not isinstance(nested_data['ConsumptionData'], dict):
-            nested_data['ConsumptionData'] = {}
-        if 'NetworkAnalyser' not in nested_data or not isinstance(nested_data['NetworkAnalyser'], dict):
-            nested_data['NetworkAnalyser'] = {}
-    else:
-        validated_data['Data'] = {}
+    # ✅ FIXED: Preserve existing nested data structures
+    if 'ConsumptionData' in business_data and isinstance(business_data['ConsumptionData'], dict):
+        # Preserve the original ConsumptionData structure
+        validated_data['ConsumptionData'] = business_data['ConsumptionData']
+        logging.info(f"[{correlation_id}] Preserved ConsumptionData with keys: {list(business_data['ConsumptionData'].keys())}")
+    
+    # ✅ FIXED: Handle legacy 'Data' field if present, but don't create empty one
+    if 'Data' in business_data and isinstance(business_data['Data'], dict):
+        validated_data['Data'] = business_data['Data']
+        logging.info(f"[{correlation_id}] Preserved Data field with keys: {list(business_data['Data'].keys())}")
+    elif 'Data' not in validated_data:
+        # Only create empty Data if it doesn't exist and we have no other data
+        if not any(key in validated_data for key in ['ConsumptionData', 'NetworkAnalyser']):
+            validated_data['Data'] = {}
+    
+    # ✅ FIXED: Preserve other fields from original MQTT payload
+    mqtt_specific_fields = ['ConsumptionData', 'NetworkAnalyser', 'PowerData', 'SensorData']
+    for field in mqtt_specific_fields:
+        if field in business_data:
+            validated_data[field] = business_data[field]
+            logging.info(f"[{correlation_id}] Preserved MQTT field '{field}' with type: {type(business_data[field]).__name__}")
     
     return _sanitize_data_recursive(validated_data)
+
+
+# ✅ REPLACE the existing _validate_business_data function with the new one
+def _validate_business_data(business_data: Dict[str, Any], correlation_id: str) -> Dict[str, Any]:
+    """
+    Redirect to the new preserve-original function.
+    """
+    return _validate_business_data_preserve_original(business_data, correlation_id)
 
 
 def _transform_to_cosmos_document(event_data: Dict[str, Any], event_metadata: Dict[str, Any], correlation_id: str) -> Optional[Dict[str, Any]]:
@@ -414,7 +471,7 @@ def _transform_to_cosmos_document(event_data: Dict[str, Any], event_metadata: Di
 
 def _log_event_inspection(event: func.EventHubEvent, correlation_id: str, event_index: int) -> None:
     """
-    Optimized event inspection logging for debugging.
+    ✅ ENHANCED: Event inspection logging with detailed CloudEvents analysis.
     """
     try:
         raw_body = event.get_body().decode('utf-8')
@@ -426,12 +483,29 @@ def _log_event_inspection(event: func.EventHubEvent, correlation_id: str, event_
             parsed_payload = json.loads(raw_body)
             if isinstance(parsed_payload, dict):
                 schema_format = _detect_schema_format(parsed_payload)
+                
+                # ✅ ADD: Special handling for CloudEvents to show MQTT data
+                cloudevents_analysis = {}
+                if schema_format == 'cloudevents_v1.0':
+                    data_field = parsed_payload.get('data', {})
+                    cloudevents_analysis = {
+                        'cloudevents_type': parsed_payload.get('type'),
+                        'cloudevents_source': parsed_payload.get('source'),
+                        'data_field_type': type(data_field).__name__,
+                        'data_field_keys': list(data_field.keys()) if isinstance(data_field, dict) else 'not_dict',
+                        'mqtt_device_id': data_field.get('DeviceId') if isinstance(data_field, dict) else 'not_found',
+                        'mqtt_customer_id': data_field.get('CustomerId') if isinstance(data_field, dict) else 'not_found',
+                        'mqtt_has_consumption_data': 'ConsumptionData' in data_field if isinstance(data_field, dict) else False
+                    }
+                
                 payload_info.update({
                     'is_valid_json': True,
                     'schema_format': schema_format,
                     'total_keys': len(parsed_payload.keys()),
-                    'top_level_keys': list(parsed_payload.keys())[:10]  # First 10 keys
+                    'top_level_keys': list(parsed_payload.keys())[:10],  # First 10 keys
+                    'cloudevents_analysis': cloudevents_analysis
                 })
+                
         except json.JSONDecodeError:
             payload_info['json_error'] = 'Invalid JSON'
         
@@ -442,7 +516,7 @@ def _log_event_inspection(event: func.EventHubEvent, correlation_id: str, event_
                 'event_index': event_index,
                 'sequence_number': event.sequence_number,
                 'payload_info': payload_info,
-                'raw_preview': _sanitize_field(raw_body[:300])  # First 300 chars
+                'raw_preview': _sanitize_field(raw_body[:500])  # Increased to 500 chars for more detail
             }
         )
         
