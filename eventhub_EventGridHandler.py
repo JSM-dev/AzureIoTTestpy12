@@ -2,18 +2,15 @@ import azure.functions as func
 import json
 import logging
 import os
-import re
 import uuid
 import base64
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 bp_eventgridHandler = func.Blueprint()
 
-# ✅ AZURE FUNCTIONS BEST PRACTICE: Simplified patterns for performance /// Thiscode works
-DEVICE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
-CUSTOMER_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
-LOCATION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
+# AZURE FUNCTIONS BEST PRACTICE: Pre-compiled patterns for performance
+DANGEROUS_CHARS = set('<>"\';&')
 
 @bp_eventgridHandler.event_hub_message_trigger(
     arg_name="azeventhub",
@@ -29,339 +26,239 @@ LOCATION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
     connection="CosmosDbConnectionString",
     create_if_not_exists=True
 )
-def EventGrid_Handler(azeventhub: List[func.EventHubEvent], cosmosout: func.Out[func.DocumentList]):
+def EventGrid_Handler_Optimized(azeventhub: List[func.EventHubEvent], cosmosout: func.Out[func.DocumentList]):
     """
-    ✅ AZURE FUNCTIONS: EventGrid handler with simplified base64 decoding.
-    Following Azure Functions best practices for performance and reliability.
+    HIGH-PERFORMANCE: Azure Functions EventGrid handler optimized for maximum efficiency.
+    Following Azure Functions best practices for cold start optimization and memory efficiency.
     """
     
     correlation_id = str(uuid.uuid4())[:8]
     batch_size = len(azeventhub)
     
-    logging.info(f"[{correlation_id}] Processing {batch_size} events (Simplified base64 support)")
+    # AZURE FUNCTIONS BEST PRACTICE: Minimal initial logging
+    logging.info(f"[{correlation_id}] Processing {batch_size} events (High-performance)")
     
+    # PERFORMANCE: Use dynamic list instead of pre-allocated array to avoid index errors
     documents = []
-    error_count = 0
-    cloudevents_count = 0
-    base64_decoded_count = 0
-    direct_payload_count = 0
     
+    # PERFORMANCE: Single counter instead of multiple variables
+    stats = {'success': 0, 'errors': 0, 'base64': 0, 'missing_fields': 0}
+    
+    # AZURE FUNCTIONS BEST PRACTICE: Single-pass processing with minimal overhead
     for i, event in enumerate(azeventhub):
         event_correlation = f"{correlation_id}_{i}"
         
         try:
-            # ✅ AZURE FUNCTIONS BEST PRACTICE: Single JSON parse with error handling
+            # PERFORMANCE: Single JSON parse with immediate CloudEvents detection
             raw_data = json.loads(event.get_body().decode('utf-8'))
             
-            # ✅ SIMPLIFIED: Enhanced CloudEvents extraction with simplified base64 support
-            extraction_result = _extract_payload_simplified(raw_data, event_correlation)
+            # OPTIMIZED: Fast CloudEvents detection and payload extraction in one step
+            payload, is_base64 = _extract_payload_fast(raw_data)
             
-            if not extraction_result['success']:
-                error_count += 1
-                logging.warning(f"[{event_correlation}] Payload extraction failed: {extraction_result['reason']}")
-                continue
-            
-            payload = extraction_result['payload']
-            
-            # Track processing statistics
-            if extraction_result.get('is_cloudevents'):
-                cloudevents_count += 1
+            if payload is not None:
+                # PERFORMANCE: Track stats efficiently
+                if is_base64:
+                    stats['base64'] += 1
+                
+                # AZURE FUNCTIONS BEST PRACTICE: Input validation with error logging
+                doc, has_missing_fields = _create_document_with_validation(payload, raw_data, event, event_correlation)
+                
+                if doc is not None:
+                    # FIXED: Use append instead of index assignment to avoid bounds errors
+                    documents.append(doc)
+                    stats['success'] += 1
+                    
+                    if has_missing_fields:
+                        stats['missing_fields'] += 1
+                else:
+                    stats['errors'] += 1
             else:
-                direct_payload_count += 1
+                stats['errors'] += 1
                 
-            if extraction_result.get('base64_decoded'):
-                base64_decoded_count += 1
-            
-            # ✅ AZURE FUNCTIONS BEST PRACTICE: Simplified validation with essential security
-            doc = _create_cosmos_document_with_validation(payload, raw_data, event, event_correlation)
-            if doc:
-                documents.append(doc)
-                
-                logging.info(
-                    f"[{event_correlation}] ✅ Document created successfully",
-                    extra={
-                        'device_id': doc.get('DeviceId'),
-                        'customer_id': doc.get('CustomerId'),
-                        'device_count': doc.get('DeviceCount', 0),
-                        'base64_decoded': extraction_result.get('base64_decoded', False)
-                    }
-                )
-            else:
-                error_count += 1
-                
-        except json.JSONDecodeError as e:
-            error_count += 1
-            logging.error(f"[{event_correlation}] JSON decode error: {str(e)}")
         except Exception as e:
-            error_count += 1
+            # AZURE FUNCTIONS BEST PRACTICE: Proper error handling and logging
+            stats['errors'] += 1
             logging.error(f"[{event_correlation}] Processing error: {str(e)}")
     
-    # ✅ AZURE FUNCTIONS BEST PRACTICE: Bulk insert with error handling
+    # AZURE FUNCTIONS BEST PRACTICE: Bulk insert with error handling
     if documents:
         try:
             cosmosout.set(func.DocumentList(documents))
-            logging.info(f"[{correlation_id}] ✅ Successfully queued {len(documents)} documents for Cosmos DB")
+            # PERFORMANCE: Single success log instead of per-document logging
+            logging.info(f"[{correlation_id}] ✅ Queued {len(documents)} documents")
         except Exception as cosmos_error:
-            logging.error(f"[{correlation_id}] ❌ Cosmos DB error: {str(cosmos_error)}")
+            logging.error(f"[{correlation_id}] ❌ Cosmos error: {str(cosmos_error)}")
     
-    # ✅ AZURE FUNCTIONS BEST PRACTICE: Comprehensive monitoring and health checks
+    # AZURE FUNCTIONS BEST PRACTICE: Implement monitoring and health checks
+    success_rate = (stats['success'] / batch_size * 100) if batch_size > 0 else 0
+    
+    # Enhanced logging with missing fields tracking
     logging.info(
-        f"[{correlation_id}] Batch processing complete",
-        extra={
-            'total_events': batch_size,
-            'successful_documents': len(documents),
-            'error_count': error_count,
-            'cloudevents_count': cloudevents_count,
-            'base64_decoded_count': base64_decoded_count,
-            'direct_payload_count': direct_payload_count,
-            'success_rate': (len(documents) / batch_size * 100) if batch_size > 0 else 0
-        }
+        f"[{correlation_id}] Complete: {stats['success']}/{batch_size} success "
+        f"({success_rate:.1f}%), {stats['base64']} base64, {stats['errors']} errors, "
+        f"{stats['missing_fields']} missing fields"
     )
-
-
-def _extract_payload_simplified(raw_data: Dict[str, Any], event_id: str) -> Dict[str, Any]:
-    """
-    ✅ SIMPLIFIED: CloudEvents extraction with simplified base64 decoding.
-    Following Azure Functions best practices for minimal overhead and robust error handling.
-    """
-    try:
-        # ✅ AZURE FUNCTIONS BEST PRACTICE: Validate input parameters
-        if not isinstance(raw_data, dict):
-            return {
-                'success': False,
-                'reason': f'Raw data is not a dictionary: {type(raw_data).__name__}',
-                'payload': None
-            }
-        
-        # ✅ CLOUDEVENTS DETECTION: Check for CloudEvents v1.0 fields
-        is_cloudevents = (
-            'specversion' in raw_data and 
-            'type' in raw_data and 
-            'source' in raw_data and
-            ('data' in raw_data or 'data_base64' in raw_data)
-        )
-        
-        if is_cloudevents:
-            logging.info(
-                f"[{event_id}] CloudEvents v1.0 detected",
-                extra={
-                    'specversion': raw_data.get('specversion'),
-                    'type': raw_data.get('type'),
-                    'has_data': 'data' in raw_data,
-                    'has_data_base64': 'data_base64' in raw_data,
-                    'datacontenttype': raw_data.get('datacontenttype')
-                }
-            )
-            
-            payload = None
-            base64_decoded = False
-            
-            # ✅ SIMPLIFIED: Handle base64-encoded data with simplified error handling
-            if 'data_base64' in raw_data:
-                base64_data = raw_data['data_base64']
-                
-                # ✅ AZURE FUNCTIONS BEST PRACTICE: Basic validation before processing
-                if not isinstance(base64_data, str) or len(base64_data) == 0:
-                    logging.warning(f"[{event_id}] Invalid base64 data format")
-                    return {
-                        'success': False,
-                        'reason': 'Invalid base64 data format',
-                        'payload': None
-                    }
-                
-                # ✅ SIMPLIFIED: Decode base64 with simple error handling
-                decoded_payload = _decode_base64_simple(base64_data, event_id)
-                if decoded_payload is not None:
-                    payload = decoded_payload
-                    base64_decoded = True
-                else:
-                    return {
-                        'success': False,
-                        'reason': 'Base64 decoding failed',
-                        'payload': None
-                    }
-            
-            # ✅ FALLBACK: Handle regular data field
-            elif 'data' in raw_data:
-                payload = raw_data['data']
-                logging.info(f"[{event_id}] Using regular data field")
-            
-            if payload is not None:
-                # ✅ AZURE FUNCTIONS BEST PRACTICE: Preserve CloudEvents metadata
-                if isinstance(payload, dict):
-                    payload['_cloudevents_metadata'] = {
-                        'specversion': raw_data.get('specversion'),
-                        'type': raw_data.get('type'),
-                        'source': raw_data.get('source'),
-                        'id': raw_data.get('id'),
-                        'time': raw_data.get('time'),
-                        'subject': raw_data.get('subject'),
-                        'datacontenttype': raw_data.get('datacontenttype')
-                    }
-                    payload['_is_cloudevents'] = True
-                    payload['_base64_decoded'] = base64_decoded
-                
-                return {
-                    'success': True,
-                    'reason': 'cloudevents_payload_extracted',
-                    'payload': payload,
-                    'is_cloudevents': True,
-                    'base64_decoded': base64_decoded
-                }
-            else:
-                return {
-                    'success': False,
-                    'reason': 'CloudEvents detected but no valid data found',
-                    'payload': None
-                }
-        else:
-            # ✅ DIRECT PAYLOAD: Handle non-CloudEvents format
-            logging.info(f"[{event_id}] Direct payload format detected")
-            raw_data['_is_cloudevents'] = False
-            raw_data['_base64_decoded'] = False
-            
-            return {
-                'success': True,
-                'reason': 'direct_payload_detected',
-                'payload': raw_data,
-                'is_cloudevents': False,
-                'base64_decoded': False
-            }
-            
-    except Exception as e:
-        logging.error(f"[{event_id}] CloudEvents extraction failed: {str(e)}")
-        return {
-            'success': False,
-            'reason': f'Extraction error: {str(e)}',
-            'payload': None
-        }
-
-
-def _decode_base64_simple(base64_data: str, event_id: str) -> Optional[Dict[str, Any]]:
-    """
-    ✅ SIMPLIFIED: Simple base64 decoding with minimal error handling.
-    Following Azure Functions best practices for performance and reliability.
-    """
-    try:
-        logging.info(f"[{event_id}] Decoding base64 data (length: {len(base64_data)})")
-        
-        # ✅ AZURE FUNCTIONS BEST PRACTICE: Simple base64 decoding
-        decoded_bytes = base64.b64decode(base64_data)
-        decoded_string = decoded_bytes.decode('utf-8')
-        
-        logging.info(
-            f"[{event_id}] Base64 decoded successfully",
+    
+    # AZURE FUNCTIONS BEST PRACTICE: Log data quality issues for monitoring
+    if stats['missing_fields'] > 0:
+        logging.warning(
+            f"[{correlation_id}] Data quality alert: {stats['missing_fields']} documents had missing required fields",
             extra={
-                'decoded_length': len(decoded_string),
-                'decoded_preview': decoded_string[:200] + '...' if len(decoded_string) > 200 else decoded_string
+                'correlation_id': correlation_id,
+                'missing_fields_count': stats['missing_fields'],
+                'total_events': batch_size,
+                'missing_fields_percentage': (stats['missing_fields'] / batch_size * 100) if batch_size > 0 else 0
             }
         )
-        
-        # Parse the decoded JSON
-        payload = json.loads(decoded_string)
-        
-        logging.info(
-            f"[{event_id}] JSON parsed from base64 data",
-            extra={
-                'payload_keys': list(payload.keys()) if isinstance(payload, dict) else 'not_dict',
-                'has_device_id': 'DeviceId' in payload if isinstance(payload, dict) else False,
-                'has_consumption_devices': ('Data' in payload and 
-                                          'ConsumptionDevices' in payload.get('Data', {})) 
-                                          if isinstance(payload, dict) else False
-            }
-        )
-        
-        return payload
-        
-    except Exception as decode_error:
-        # ✅ SIMPLIFIED: Single exception handler for all decode errors
-        logging.error(f"[{event_id}] Base64 decode failed: {str(decode_error)}")
-        return None
 
 
-def _create_cosmos_document_with_validation(payload: Dict[str, Any], original_event: Dict[str, Any], event: func.EventHubEvent, event_id: str) -> Optional[Dict[str, Any]]:
+def _extract_payload_fast(raw_data: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], bool]:
     """
-    ✅ AZURE FUNCTIONS: Create Cosmos DB document with simplified validation.
-    Following Azure Functions best practices for data validation and document structure.
+    HIGH-PERFORMANCE: Fast payload extraction optimized for Azure EventGrid CloudEvents.
+    Following Azure Functions best practices for minimal overhead and single-pass processing.
     """
-    try:
-        # ✅ AZURE FUNCTIONS BEST PRACTICE: Input validation and sanitization
-        if not isinstance(payload, dict):
-            logging.warning(f"[{event_id}] Payload is not a dictionary: {type(payload).__name__}")
-            return None
-        
-        # Extract and validate core fields with safe defaults
-        device_id = str(payload.get('DeviceId', 'unknown-device'))[:50]
-        customer_id = str(payload.get('CustomerId', 'default-customer'))[:50]
-        location_site_id = str(payload.get('LocationSiteId', 'default-location'))[:50]
-        
-        # ✅ SIMPLIFIED: Basic character sanitization
-        device_id = ''.join(char for char in device_id if char not in '<>"\';&')
-        customer_id = ''.join(char for char in customer_id if char not in '<>"\';&')
-        location_site_id = ''.join(char for char in location_site_id if char not in '<>"\';&')
-        
-        # ✅ AZURE FUNCTIONS BEST PRACTICE: Extract consumption devices information
-        consumption_devices = payload.get('Data', {}).get('ConsumptionDevices', {})
-        device_count = len(consumption_devices) if isinstance(consumption_devices, dict) else 0
-        
-        # Create simple device summary
-        device_summary = {}
-        if isinstance(consumption_devices, dict) and device_count > 0:
-            device_ids = list(consumption_devices.keys())
-            device_summary = {
-                'device_ids': [csdid[:8] for csdid in device_ids[:5]],  # First 5 devices, truncated
-                'total_readings': sum(
-                    len(device.get('ConsumptionData', []))
-                    for device in consumption_devices.values()
-                    if isinstance(device, dict)
-                )
-            }
-        
-        # ✅ AZURE FUNCTIONS BEST PRACTICE: Optimized document structure
-        document = {
-            'id': str(uuid.uuid4()),
-            
-            # Core business fields
-            'CustomerId': customer_id,
-            'LocationSiteId': location_site_id,
-            'DeviceId': device_id,
-            
-            # Device information
-            'DeviceCount': device_count,
-            'DeviceSummary': device_summary,
-            
-            # ✅ PRESERVE: CloudEvents metadata as requested
-            'Source': payload.get('_cloudevents_metadata', {}).get('source'),
-            'EventTime': payload.get('_cloudevents_metadata', {}).get('time'),
-            'Subject': payload.get('_cloudevents_metadata', {}).get('subject'),
-            'EventType': payload.get('_cloudevents_metadata', {}).get('type'),
-            'DataContentType': payload.get('_cloudevents_metadata', {}).get('datacontenttype'),
-            
-            # ✅ PRESERVE: Complete data field as requested
-            'Data': payload.get('Data', {}),
-            
-            # Processing metadata
-            'Timestamp': datetime.now(timezone.utc).isoformat(),
-            'SequenceNumber': event.sequence_number,
-            'EventFormat': 'CloudEvents v1.0' if payload.get('_is_cloudevents') else 'Direct Payload',
-            'Base64Decoded': payload.get('_base64_decoded', False),
-            'ProcessingVersion': 'simplified-v2.0'
-        }
-        
-        logging.info(
-            f"[{event_id}] Document created successfully",
+    # PERFORMANCE: Fast type check and CloudEvents detection in one step
+    if not isinstance(raw_data, dict) or 'specversion' not in raw_data:
+        # PERFORMANCE: Early return for non-CloudEvents
+        raw_data['_is_cloudevents'] = False
+        return raw_data, False
+    
+    # OPTIMIZED: CloudEvents detected - extract payload efficiently
+    payload = None
+    is_base64 = False
+    
+    # PERFORMANCE: Check data_base64 first (most common for Azure EventGrid)
+    data_base64 = raw_data.get('data_base64')
+    if data_base64:
+        try:
+            # PERFORMANCE: Direct base64 decode without intermediate validation
+            decoded_bytes = base64.b64decode(data_base64)
+            payload = json.loads(decoded_bytes.decode('utf-8'))
+            is_base64 = True
+        except Exception:
+            # PERFORMANCE: Silent failure - try data field as fallback
+            pass
+    
+    # PERFORMANCE: Fallback to data field if base64 failed
+    if payload is None:
+        payload = raw_data.get('data')
+    
+    # OPTIMIZED: Add CloudEvents metadata efficiently if payload exists
+    if payload is not None and isinstance(payload, dict):
+        # PERFORMANCE: Single dictionary operation instead of multiple assignments
+        payload.update({
+            '_cloudevents_metadata': {
+                'source': raw_data.get('source'),
+                'type': raw_data.get('type'),
+                'time': raw_data.get('time'),
+                'subject': raw_data.get('subject'),
+                'datacontenttype': raw_data.get('datacontenttype')
+            },
+            '_is_cloudevents': True,
+            '_base64_decoded': is_base64
+        })
+    
+    return payload, is_base64
+
+
+def _create_document_with_validation(payload: Dict[str, Any], original_event: Dict[str, Any], event: func.EventHubEvent, event_correlation: str) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """
+    HIGH-PERFORMANCE: Fast document creation with required field validation and error logging.
+    Following Azure Functions best practices for input validation and proper error handling.
+    """
+    # PERFORMANCE: Fast type check
+    if not isinstance(payload, dict):
+        logging.error(f"[{event_correlation}] Invalid payload type: {type(payload).__name__}")
+        return None, False
+    
+    # AZURE FUNCTIONS BEST PRACTICE: Validate required business fields with error logging
+    missing_fields = []
+    has_missing_fields = False
+    
+    # Extract required fields and track missing ones
+    device_id_raw = payload.get('DeviceId')
+    customer_id_raw = payload.get('CustomerId')
+    location_site_id_raw = payload.get('LocationSiteId')
+    
+    # AZURE FUNCTIONS BEST PRACTICE: Proper input validation with structured logging
+    if not device_id_raw or device_id_raw in ['', 'unknown-device']:
+        missing_fields.append('DeviceId')
+        has_missing_fields = True
+    
+    if not customer_id_raw or customer_id_raw in ['', 'default-customer']:
+        missing_fields.append('CustomerId')
+        has_missing_fields = True
+    
+    if not location_site_id_raw or location_site_id_raw in ['', 'default-location']:
+        missing_fields.append('LocationSiteId')
+        has_missing_fields = True
+    
+    # AZURE FUNCTIONS BEST PRACTICE: Structured error logging for missing fields
+    if missing_fields:
+        logging.warning(
+            f"[{event_correlation}] Missing required fields: {', '.join(missing_fields)}",
             extra={
-                'device_id': device_id,
-                'customer_id': customer_id,
-                'location_site_id': location_site_id,
-                'device_count': device_count,
-                'total_readings': device_summary.get('total_readings', 0),
-                'base64_decoded': payload.get('_base64_decoded', False)
+                'correlation_id': event_correlation,
+                'missing_fields': missing_fields,
+                'available_fields': list(payload.keys()),
+                'device_id_present': 'DeviceId' in payload,
+                'customer_id_present': 'CustomerId' in payload,
+                'location_site_id_present': 'LocationSiteId' in payload
             }
         )
+    
+    # OPTIMIZED: Single-pass field extraction and sanitization with fallbacks
+    device_id = _sanitize_field_fast(device_id_raw or 'unknown-device')
+    customer_id = _sanitize_field_fast(customer_id_raw or 'default-customer')
+    location_site_id = _sanitize_field_fast(location_site_id_raw or 'default-location')
+    
+    # PERFORMANCE: Fast device count calculation
+    consumption_devices = payload.get('Data', {}).get('ConsumptionDevices', {})
+    device_count = len(consumption_devices) if isinstance(consumption_devices, dict) else 0
+    
+    # OPTIMIZED: Create document with single dictionary operation
+    cloudevents_meta = payload.get('_cloudevents_metadata', {})
+    
+    document = {
+        'id': str(uuid.uuid4()),
         
-        return document
+        # PERFORMANCE: Core fields for efficient indexing
+        'CustomerId': customer_id,
+        'LocationSiteId': location_site_id,
+        'DeviceId': device_id,
+        'DeviceCount': device_count,
         
-    except Exception as e:
-        logging.error(f"[{event_id}] Document creation failed: {str(e)}")
-        return None
+        # AZURE FUNCTIONS BEST PRACTICE: Track data quality for monitoring
+        'MissingRequiredFields': missing_fields if missing_fields else None,
+        'HasMissingFields': has_missing_fields,
+        
+        # PERFORMANCE: CloudEvents metadata in single operation
+        'Source': cloudevents_meta.get('source'),
+        'EventTime': cloudevents_meta.get('time'),
+        'Subject': cloudevents_meta.get('subject'),
+        'EventType': cloudevents_meta.get('type'),
+        'DataContentType': cloudevents_meta.get('datacontenttype'),
+        
+        # PRESERVE: Complete data as requested
+        'Data': payload.get('Data', {}),
+        
+        # PERFORMANCE: Minimal processing metadata
+        'Timestamp': datetime.now(timezone.utc).isoformat(),
+        'SequenceNumber': event.sequence_number,
+        'Base64Decoded': payload.get('_base64_decoded', False),
+        'ProcessingVersion': 'validated-v1.0'
+    }
+    
+    return document, has_missing_fields
+
+
+def _sanitize_field_fast(value: Any) -> str:
+    """
+    HIGH-PERFORMANCE: Fast field sanitization with minimal overhead.
+    Following Azure Functions best practices for efficient string processing.
+    """
+    # PERFORMANCE: Fast string conversion and length limit
+    str_value = str(value)[:50]
+    
+    # OPTIMIZED: Fast character filtering using set membership
+    return ''.join(char for char in str_value if char not in DANGEROUS_CHARS)
