@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 
 bp_eventgridHandler = func.Blueprint()
 
-# ✅ AZURE FUNCTIONS BEST PRACTICE: Simplified patterns for performance
+# ✅ AZURE FUNCTIONS BEST PRACTICE: Simplified patterns for performance /// Thiscode works
 DEVICE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
 CUSTOMER_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
 LOCATION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,50}$')
